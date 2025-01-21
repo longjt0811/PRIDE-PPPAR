@@ -1,7 +1,7 @@
 !
 !! get_wgt_mean.f90
 !!
-!!    Copyright (C) 2021 by Wuhan University
+!!    Copyright (C) 2023 by Wuhan University
 !!
 !!    This program belongs to PRIDE PPP-AR which is an open source software:
 !!    you can redistribute it and/or modify it under the terms of the GNU
@@ -9,13 +9,13 @@
 !!
 !!    This program is distributed in the hope that it will be useful,
 !!    but WITHOUT ANY WARRANTY; without even the implied warranty of
-!!    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+!!    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 !!    GNU General Public License (version 3) for more details.
 !!
 !!    You should have received a copy of the GNU General Public License
-!!    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+!!    along with this program. If not, see <https://www.gnu.org/licenses/>.
 !!
-!! Contributor: Jianghui Geng
+!! Contributor: Jianghui Geng, Jihang Lin
 !! 
 !!
 !!
@@ -31,10 +31,16 @@ implicit none
 
 integer*4 nxl,ndl,flg(1:*)
 real*8    drang,rxl(1:*)
+
 !
 !! local
 integer*4 i,j,k,nmed,nmd
 real*8 rmed(2),rmd(2),resi(nxl),pnew(nxl),p(nxl),cost_new,cost
+
+!
+!! initialize
+p = 1.d9
+pnew = 0.d0
 !
 !! iterate until no elements removed
 if(count(flg(1:nxl).lt.2).gt.2) then
