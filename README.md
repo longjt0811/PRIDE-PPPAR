@@ -1,171 +1,151 @@
 ![pridelab.icon](https://github.com/PrideLab/PRIDE-PPPAR/blob/master/doc/PRIDE.png)
-## PRIDE-PPPAR ver. 2.2
 
-PRIDE PPP-AR ver. 2.2 originates in Dr. Maorong Ge’s efforts on PPP-AR and later developed and improved by Dr. Jianghui Geng's team. It is an open-source software package which is based on many GNSS professionals’ collective work in GNSS Research Center, Wuhan University. We would like to thank them all for their brilliant contributions to this software. 
+## PRIDE-PPPAR ver. 3.1.2(last updated on 2025-01-25)
 
-We make this package open source with the goal of benefiting those professionals in their early career, and also advocate the geodetic and geophysical applications of GNSS PPP-AR. Especially, we hope that this package can contribute to high-precision applications in geosciences such as crustal motion and troposphere sounding studies. The entire open-source project is funded by the National Natural Science Foundation of China (No. 42025401) and is under the auspices of IAG SC 4.4 “GNSS Integrity and Quality Control”.
+PRIDE PPP-AR originates in Dr. Maorong Ge’s efforts on PPP-AR and later developed and improved by Dr. Jianghui Geng's team. It is an open-source software package which is based on many GNSS professionals’ collective work in GNSS Research Center, Wuhan University. We would like to thank them all for their brilliant contributions to this software. 
 
-The precise products can be accessed at ftp://igs.gnsswhu.cn/pub/whu/phasebias/. 
-Latest updates for Support, Training courses and FAQ can be found at https://pride.whu.edu.cn. 
+We make this package open source with the goal of benefiting those professionals in their early career, and also advocate the geodetic and geophysical applications of GNSS PPP-AR. Especially, we hope that this package can contribute to high-precision applications in geosciences such as crustal motion and troposphere sounding studies. The entire open-source project is funded by the National Natural Science Foundation of China (No. 42025401) and is under the auspices of IAG Sub-Commission 4.2 "Multi-constellation and multi-frequency GNSS" and [IGS Pilot Project PPP-AR](https://igs.org/wg/ppp-ar/#rapid).
+
+The GNSS products are accessible at <ftp://igs.gnsswhu.cn/pub/whu/phasebias>.
+Latest updates for Support, Training courses and FAQ can be found at <http://pride.whu.edu.cn>.
 The copyright of this package is protected by GNU General Public License (version 3). 
 
 Relevant publications are
 
-* Geng J, Wen Q, Zhang Q, Li G, Zhang K (2022). GNSS observable-specific phase biases for all-frequency PPP ambiguity resolution. Journal of Geodesy, 96(11):1-18. doi:10.1007/s00190-022-01602-3
-* Geng J, Chen X, Pan Y, Zhao Q (2019). A modified phase clock/bias model to improve PPP ambiguity resolution at Wuhan University. Journal of Geodesy, 93(10):2053-2067. doi:10.1007/s00190-019-01301-6
-* Geng J, Chen X, Pan Y, Mao S, Li C, Zhou J, Zhang K (2019). PRIDE PPP‑AR: an open‑source software for GPS PPP ambiguity resolution. GPS Solutions, 23(91):1-10. doi:10.1007/s10291-019-0888-1
-* Geng J, Yang S, Guo J (2021). Assessing IGS GPS/Galileo/BDS-2/BDS-3 phase bias products with PRIDE PPP-AR. Satellite Navigation, 2(1):1-15. doi:10.1186/s43020-021-00049-9
-* Geng J, Mao S. Massive GNSS network analysis without baselines: Undifferenced ambiguity resolution. J. Geophys. Res. 2021, 126(10), e2020JB021558. doi:10.1029/2020JB021558
+* Geng J, Zhang Q, Li G, Liu J, Liu D (2022). Observable-specific phase biases of Wuhan multi-GNSS experiment analysis center's rapid satellite products. *Satellite Navigation*, 3(1):1-15. doi:[10.1186/s43020-022-00084-0](https://doi.org/10.1186/s43020-022-00084-0)
+* Geng J, Wen Q, Zhang Q, Li G, Zhang K (2022). GNSS observable-specific phase biases for all-frequency PPP ambiguity resolution. *Journal of Geodesy*, 96(11):1-18. doi:[10.1007/s00190-022-01602-3](https://doi.org/10.1007/s00190-022-01602-3)
+* Geng J, Mao S (2021). Massive GNSS network analysis without baselines: Undifferenced ambiguity resolution. *Journal of Geophysical Research: Solid Earth*. 126(10), e2020JB021558. doi:[10.1029/2020JB021558](https://doi.org/10.1029/2020JB021558)
+* Geng J, Yang S, Guo J (2021). Assessing IGS GPS/Galileo/BDS-2/BDS-3 phase bias products with PRIDE PPP-AR. *Satellite Navigation*, 2(1):1-15. doi:[10.1186/s43020-021-00049-9](https://doi.org/10.1186/s43020-021-00049-9)
+* Geng J, Chen X, Pan Y, Zhao Q (2019). A modified phase clock/bias model to improve PPP ambiguity resolution at Wuhan University. *Journal of Geodesy*, 93(10):2053-2067. doi:[10.1007/s00190-019-01301-6](https://doi.org/10.1007/s00190-019-01301-6)
+* Geng J, Chen X, Pan Y, Mao S, Li C, Zhou J, Zhang K (2019). PRIDE PPP‑AR: an open‑source software for GPS PPP ambiguity resolution. *GPS Solutions*, 23(91):1-10. doi:[10.1007/s10291-019-0888-1](https://doi.org/10.1007/s10291-019-0888-1)
+* Zeng J, Geng J, Li G, Tang W (2024). Improving cycle slip detection in ambiguity-fixed precise point positioning for kinematic LEO orbit determination. *GPS Solutions*, 28(3): 135. doi:[10.1007/s10291-024-01639-1](https://doi.org/10.1007/s10291-024-01639-1) 
+* Geng J, Zhang H, Li G, Aoki Y (2024). Multipath mitigation for GPS/Galileo/BDS-3 precise point positioning with overlap-frequency signals. *Satellite Navigation*,22(5). doi:[10.1186/s43020-024-00144-7](https://doi.org/10.1186/s43020-024-00144-7)
 
-PRIDE PPP-AR ver. 2.2 are available for:  
+PRIDE PPP-AR ver. 3.1 is available for:
 
-1) GPS, GLONASS, Galileo, BDS-2/3 and QZSS capable;  
-2) High-rate GNSS data processing of up to 50 Hz;
-3) Vienna Mapping Function 1/3 (VMF3) for troposphere modeling;  
-4) Second-order ionospheric correction;  
-5) High-dynamic mobile platforms applicable for aerial photogrammetry, ship-borne gravimetry, etc;  
-6) Receiver clock jump mitigation;  
-7) Multi-day processing;  
-8) Satellite attitude quaternions;  
-9) A GUI lite-version provided for very early career researchers;  
-10) Ambiguity-float PPP using data dating back to 1994 when SA was on;  
-11) GPS/Galileo/BDS-2/3 PPP-AR in the case of the bias-SINEX format phase biases (ftp://igs.gnsswhu.cn);
-12) Adopt both rapid products (RAP) and real-time products (RTS) for more timeliness.
+1) Multi-GNSS data processing with GPS, GLONASS, Galileo, BDS-2/3 and QZSS
+2) All-frequency PPP-AR on any dual-frequency ionosphere-free combinations of GPS, Galileo, and BDS-2/3
+3) High-rate GNSS data processing up to 50 Hz
+4) High-dynamic mobile platforms applicable for aerial photogrammetry, ship-borne gravimetry, etc.
+5) Kinematic orbiting for LEO satellites
+6) Multi-day processing up to 108 days (at a sampling rate of 30 s) without day-boundary discontinuities
+7) IPPP clock estimation for time and frequency transfer
+8) Troposphere modeling with Vienna Mapping Function 1/3 (VMF1/VMF3)
+9) Second-order ionospheric delay correction with GIM products
+10) Receiver clock jump detection and mitigation
+11) Adoption of the latest IGS conventions: Bias-SINEX, IGS20 reference frame, ORBEX, RINEX 4, etc.
+12) User-friendly operation and visualization for early-career researchers with lite-version GUI
+13) Ambiguity-float PPP with backward compatibility from 1994 when selective availablity (SA) was on
+14) Timely data processing with rapid (RAP) products and real-time archived (RTS) products
+15) Multipath delay compensation based on Multipath Hemispherical Map model
 
-The modifications leading to Version 2.2 include:
+The improvements made in PRIDE PPP-AR version 3.1 include:
 
-1. Batch script name changed from “*pride_pppar*” to “*pdp3*”, corresponding command line input parameters also changed;
-2. Support multi-day processing;
-3. Support for quaternion products;
-4. No more DCB products required;
-5. The default products after 2020 changed to the multi-GNSS satellite orbit, clock, bias, quaternion and ERP products, which are computed and released by Wuhan University;
-6. The table file “leap.sec” needs to be downloaded now, and the “glonass\_chn” table file is removed and replaced by the “sat\_parameters” table file;
-7. GUI version of PRIDE PPP-AR with additional plotting functions;
-8. Fix known bugs.
+* Enable all-frequency PPP-AR on any dual-frequency ionosphere-free combinations
+* Employ the latest WUM0MGXRAP products to resolve ambiguities on new GNSS signals (L5/E6/E5b/E5B/B1C/B2a/B2)
+* Support kinematic orbiting for LEO satellites
+* Improve capability and long-term consistency of multi-day processing
+* Provide more command-line options and models for parameter estimation
+* Increase compatibility with the latest IGS data and product extensions
+* Refine the data format of result files and the output information of program runs
 
-`Notes: The multi-GNSS multi-GNSS satellite orbit/clock/bias/quaternion products, which are computed and released by Wuhan University, are required by PRIDE PPP-AR ver. 2.2`
+`Notes: The all-frequency satellite orbit/clock/bias/ERP/quaternion products from Wuhan University are required by PRIDE PPP-AR`
+
+## Contributors
+
+### Developers
+* Jianghui Geng, Qiang Wen, Maorong Ge, Songfeng Yang, Honghai Zhang, Kunlun Zhang, Jihang Lin, Wenyi Li, Shuyin Mao, Yuanxin Pan, Jing Zeng, Yingda Deng
+
+### Testers
+* Zhaoyan Liu, Qi Zhang, Bingqing Li, Yiwei Feng, Bingchen Fu, Yahao Zhang, Xun Ma
+
 
 ## Version History
 
-### v1.0
+See our [Change Log](https://github.com/PrideLab/PRIDE-PPPAR/blob/master/CHANGELOG.md) for detailed update history before version 3.1.
 
-2019-03-21
+### 2025-01-25 (v3.1.2)
+* `lsq`: enable the processing of RINEX files with non-standard time label
 
-Release of PRIDE PPP-AR v1.0
+### 2025-01-19 (v3.1.1)
+* `pdp3`: Disable the use of RTS products in MHM modeling
 
-### v1.1
+### 2025-01-06 (v3.1.0)
+* `mhm`: a new module enabling multipath delay compensation based on Multipath Hemispherical Map model (MHM)
+* `gui`: add support for RINEX versions greater than 4.0 
 
-2019-04-03
+### 2024-11-05 (v3.0.5)
+* `pdp3` : add a new argument '-twnd' to specify the processing time window for not standard rinex obs
+* `pdp3` : add 'curl' as an alternative download tool in Linux version
+* `lib` : enable correction for satellite PCVs varying with azimuth
+* Other routine maintenance
 
-* Small bug fixing
-* RINEX-3 support
-* Fixed bug for high-rate computation
-* Support Linux-32 system (src/lib/shard/linux-32)
-* Support Mac OS system (src/lib/shard/mac)
+### 2024-09-08 (v3.0)
+* `lib` & `tedit`: use DOCB block in BIAS-SINEX file to decide whether reset ambiguity at midnight
+* `otl`: enable self-computed ocean tide loading correction in case of no oceanload coefficients for user stations
+* `lsq`: add a function to support random walk constraint between epochs in position domain (P mode)
 
-### v1.2
+### 2024-04-08 (v3.0)
 
-2019-05-01
+* `lib` & `spp`: enable multi-day processing of non-consecutive daily RINEX files
+* `tedit`: improve implementation of loose editing for kinematic positioning
+* `lsq`: reduce the weight of GLONASS pseudorange observations to improve multi-GNSS positioning performance
 
-* Support VMF1
+### 2024-02-08 (v3.0)
 
-### v1.3
+* Employ the latest **WUM0MGXRTS** products to perform all-frequency PPP-AR on GNSS data with hours latency
+  * Real-time archived from Wuhan University GPS/Galileo/BDS phase bias stream and updated every 3 hours
+* `lib` & `spp`: fix bug for unexpected termination in multi-day processing
 
-2019-05-23
+### 2023-12-13 (v3.0)
 
-* Auto-selection of IGS ATX
-* Change SP3 from COD to WHU since 2019
+* `pdp3`: add IGN FTP site <ftp://igs.ign.fr/pub/igs/products/mgex/> to GNSS product download path
+* `pdp3`: refine the procedures for ambiguity resolution when missing code/phase biases for some satellites
 
-2019-06-01
+### 2023-11-24 (v3.0)
 
-* Add src/utils/xyz2enu
+Release of **PRIDE PPP-AR v3.0**
 
-2019-07-12
+* Enable **all-frequency PPP-AR** on any dual-frequency ionosphere-free combinations
+  * `pdp3`: add `-frq` option to choose the signal frequencies for each GNSS
+  * `pdp3`: add verification for the availability of observations and code/phase OSBs
+* Employ the latest **WUM0MGXRAP** products to resolve ambiguities on new GNSS signals
+  * Rapid all-frequency phase clock/bias products from Wuhan Univeristy
+  * Support ambiguity resolution on GPS L1/L2/L5, Galileo E1/E5a/E6/E5b/E5, BDS B1C/B1I/B2a/B3I/B2
+  * Append satellite orbit, clock, and quaternion records at the second midnight
+  * Align phase clock/bias across consecutive days to mitigate day-bounday discontinuities
+* Support precise orbit determination for **LEO satellites**
+  * `pdp3`: add `L` positioning mode for kinematic orbiting of LEO satellites
+  * `table`: add processing scripts for GRACE and GRACE-FO, other LEO satellites can be integrated manually
+  * `table`: add setting `LEO quaternions` in `config_template` to specify attitude products for LEO satellites
+* Improve capability and long-term consistency of **multi-day processing**
+  * Enhance capability of multi-day processing to 108 days
+  * Enable establishing integer-ambiguity constraints across midnights with aligned GNSS products to **mitigate day-boundary discontinuities** in the result
+  * `table`: add setting `Truncate at midnight` in `config_template` to set whether to truncate ambiguities at the day boundaries
+* Provide more command-line options and models for parameter estimation
+  * `pdp3`: add `-r` option to choose `WNO`/`STO` model for receiver clock estimation
+  * `pdp3`: add `-h` option to choose `NON`/`PWC`/`STO` model for HTG estimation
+* Increase compatibility with the latest IGS data and product extensions
+  * Support observation data and broadcast ephemerides in **RINEX 4**
+  * `lib`: fix bug for not reading interspersing AR and AS clock records
+  * `lib`: fix bug for not reading time-varying OSB estimates and their gradients
+  * `lib`: fix bug for not reading non-16-digit quaternions
+* Refine the data format of result files and the output information of program runs
+  * Add header information (antenna, PCO, frequency selection, positioning mode, etc.) in result files
+  * Increase the number of digits in `kin` file and `res` file
+  * `pdp3`: add `-v` option to output detailed information from `arsig` and `lsq`
+  * `xyz2enu`: output RMS instead of STD when reference coordinates are specified
 
-* Support rapid phasebias product
+Special notes for compatibility with older versions of PRIDE PPP-AR:
 
-### v1.4
-
-2019-07-16
-
-* Add function: receiver clock jump check & recover
-* Print table valid time by pride_pppar
-* Compatibility fixing for pride_pppar.sh
-* If 'rnx2rtkp' doesn't work, please download the source code through
-   'https://github.com/tomojitakasu/RTKLIB/tree/rtklib_2.4.3' and compile it by yourself.
-   The binary we provided is a 32-bit version.
-
-2019-09-05
-
-* pride_pppar.sh: small bugs fixed
-* table: igs14.atx updated
-
-2019-12-15
-
-* install.sh: add install tips for src/lib/libpridepppar.so
-* pride_pppar.sh: fix known bugs & add error replay for debug
-* table: jpleph_de405 updated (valid until 2040-007)
-* table: update IGS14.atx (igs14_2082.atx)
-
-### v2.0
-
-2021-05-21
-
-Release of PRIDE PPP-AR v2.0
-
-### v2.1
-
-2021-09-06
-
-Release of PRIDE PPP-AR v2.1
- 
-* Support for quaternion products
-
-### v2.2
-
-2022-04-07
-
-Release of PRIDE PPP-AR v2.2
- 
-* Batch script name changed from “*pride_pppar*” to “*pdp3*”, corresponding command line input parameters also changed
-* Support multi-day processing
-* No more DCB products required
-* The default products after 2020 changed to the multi-GNSS satellite orbit, clock, bias, quaternion and ERP products, which are computed and released by Wuhan University
-* The table file “leap.sec” needs to be downloaded now, and the “glonass_chn” table file is removed and replaced by the “sat_parameters” table filex
-* GUI version of PRIDE PPP-AR with additional plotting functions
-* Fix known bugs
-
-2022-05-07
-
-* install.sh: default table directory can be set outside /home directory
-* pdp3.sh: adjust PCO/PCV models used for different CODE products
-* pdp3.sh: naming patterns for RINEX observation file are more compatible
-* pdp3.sh: support file paths with spaces
-* pdp3.sh: support old versions of *wget*
-* table: add M14.ATX 
-
-2022-06-20
-
-* pdp3.sh: add alerts to some improper operations
-* pdp3.sh: add OFFLINE mode that can save the time from calling *wget*
-* pdp3.sh: add SA mode for SPP processing
-* pdp3.sh: bug fixes in creating linkage to ANTEX file which may damage this file in batch processing 
-* pdp3.sh: bug fixes in unexpected break off in multi-day processing when the first observation file is truncated
-* pdp3.sh: increase the maximum number of days for multi-day processing from 5 to 32
-
-2022-10-28
-
-* pdp3.sh: increase the maximum processing interval from 30.0 to 300.0 seconds
-* pdp3.sh: fix syntax errors in some of the output
-* spp: the timestamp of the initial coordinates file are now aligned to the timestamp of observations
-* lsq: fixed some possible fatal issues caused by rounding errors
-* tedit: arguments with decimal comma now no longer causes the run to hang indefinitely
-
-2022-11-08
-
-* pdp3.sh: increase the number of decimal places in the time range from two to three
+1) `pdp3_Mac.sh` has been integrated into `pdp3.sh`
+2) Older versions of PRIDE PPP-AR cannot recognize the new namings of WUM0MGXRAP and WUM0MGXRTS products
+3) Older versions of PRIDE PPP-AR cannot read the new settings in configuration file
+4) Older versions of PRIDE PPP-AR cannot read the new format in result files
  
 ## Getting in Touch
+
+[![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2FPrideLab%2FPRIDE-PPPAR&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=PAGE+VIEWS&edge_flat=false)](https://hits.seeyoufarm.com)
 
 * You can contact us for **bug reports** and **comments** by sending an email or leaving a message on our website:
   * Email: <pride@whu.edu.cn>
@@ -175,6 +155,4 @@ Release of PRIDE PPP-AR v2.2
 
 ## License
 
-***Copyright (C) 2022 by Wuhan University, All rights reserved.***
-
----
+***Copyright (C) 2023 by Wuhan University, All rights reserved.***

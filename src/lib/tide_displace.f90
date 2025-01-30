@@ -1,7 +1,7 @@
 !
 !! tide_displace.f90
 !!
-!!    Copyright (C) 2021 by Wuhan University
+!!    Copyright (C) 2023 by Wuhan University
 !!
 !!    This program belongs to PRIDE PPP-AR which is an open source software:
 !!    you can redistribute it and/or modify it under the terms of the GNU
@@ -9,11 +9,11 @@
 !!
 !!    This program is distributed in the hope that it will be useful,
 !!    but WITHOUT ANY WARRANTY; without even the implied warranty of
-!!    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+!!    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 !!    GNU General Public License (version 3) for more details.
 !!
 !!    You should have received a copy of the GNU General Public License
-!!    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+!!    along with this program. If not, see <https://www.gnu.org/licenses/>.
 !!
 !! Contributor: Maorong Ge, Jianghui Geng, Shuyin Mao, Songfeng Yang
 !! 
@@ -31,11 +31,11 @@
 !!        dx  -- position correction
 !
 subroutine tide_displace(tide,jd,t,xsit_j,xsit_f,xsun,xlun,rot_f2j,rot_l2f,&
-                         lat,lon,sidtm,xpole,ypole,olc,disp)
+                         lat,lon,sidtm,xpole,ypole,olc,otlfil,disp)
 implicit none
 include '../header/const.h'
 
-character*(*) tide
+character*(*) tide,otlfil
 integer*4 jd
 real*8    xsit_j(1:*),xsit_f(1:*),xsun(1:*),xlun(1:*),disp(1:*)
 real*8    t,lat,lon,xpole,ypole,sidtm,rot_f2j(3,3),rot_l2f(3,3),olc(11,6)
@@ -91,7 +91,11 @@ endif
   !! 3. Displacement due to ocean-loading
 if(index(tide,'OCEAN').ne.0) then
   dxi(1:3)=0.d0
-  call hardisp(jdutc,tutc,olc,1,0.d0,dxi)
+  if (all(olc .ne. 0.d0)) then
+    call hardisp(jdutc,tutc,olc,1,0.d0,dxi)
+  else
+    call otldisp(jdutc,tutc,otlfil,dxi)
+  endif
   call matmpy(rot_l2f,dxi,dxi,3,3,1) 
   call matmpy(rot_f2j,dxi,dxi,3,3,1)
   do i=1,3

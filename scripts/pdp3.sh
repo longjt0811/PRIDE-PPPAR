@@ -2,17 +2,17 @@
 
 ###############################################################################
 ##                                                                           ##
-##  PURPOSE: GNSS PPP&PPP-AR data processing with PRIDE PPP-AR 2             ##
+##  PURPOSE: GNSS PPP&PPP-AR data processing with PRIDE PPP-AR 3             ##
 ##                                                                           ##
 ##  AUTHOR : PRIDE LAB      pride@whu.edu.cn                                 ##
 ##                                                                           ##
-##  VERSION: ver 2.2                                                         ##
+##  VERSION: ver 3.1                                                         ##
 ##                                                                           ##
-##  DATE   : Nov-08, 2022                                                    ##
+##  DATE   : Apr-08, 2024                                                    ##
 ##                                                                           ##
-##              @ GNSS RESEARCH CENTER, WUHAN UNIVERSITY, 2022               ##
+##              @ GNSS RESEARCH CENTER, WUHAN UNIVERSITY, 2023               ##
 ##                                                                           ##
-##    Copyright (C) 2022 by Wuhan University                                 ##
+##    Copyright (C) 2023 by Wuhan University                                 ##
 ##                                                                           ##
 ##    This program is free software: you can redistribute it and/or modify   ##
 ##    it under the terms of the GNU General Public License (version 3) as    ##
@@ -20,16 +20,16 @@
 ##                                                                           ##
 ##    This program is distributed in the hope that it will be useful,        ##
 ##    but WITHOUT ANY WARRANTY; without even the implied warranty of         ##
-##    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          ##
+##    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the           ##
 ##    GNU General Public License (version 3) for more details.               ##
 ##                                                                           ##
 ##    You should have received a copy of the GNU General Public License      ##
-##    along with this program.  If not, see <https://www.gnu.org/licenses/>. ##
+##    along with this program. If not, see <https://www.gnu.org/licenses/>.  ##
 ##                                                                           ##
 ###############################################################################
 
 ######################################################################
-##                        Message Colors                            ##
+##                          Message Color                           ##
 ######################################################################
 
 readonly NC='\033[0m'
@@ -45,20 +45,46 @@ readonly MSGINF="${BLUE}::$NC"
 readonly MSGSTA="${BLUE}===>$NC"
 
 ######################################################################
-##                        Basic Settings                            ##
+##                          Basic Setting                           ##
 ######################################################################
 
 shopt -s extglob                        # Enable Extendded Globbing
+readonly LC_NUMERIC="en_US.UTF-8"       # Specify period decimal point
+readonly OS="$(uname)"                  # Operation System
 
-readonly DEBUG=NO                       # YES/NO (uppercase!)
+readonly DEBUG=YES                      # YES/NO (uppercase!)
 readonly OFFLINE=NO                     # OFFLINE=YES will overwrite USECACHE=NO
 readonly USECACHE=YES
+readonly USERTS=YES
 
 readonly SCRIPT_NAME="pdp3"
-readonly VERSION_NUM="2.2"
+readonly VERSION_NUM="3.1.1"
 
 ######################################################################
-##                     Funciton definations                         ##
+##                     System-specific Command                      ##
+######################################################################
+
+sedi() {
+    local cmd="$1"
+    local fil="$2"
+    if [ "$OS" == "Darwin" ]; then
+        sed -i '' "$cmd" "$fil"
+    else
+        sed -i "$cmd" "$fil"
+    fi
+}
+
+rdlk() {
+    local arg="$1"
+    if [ "$OS" == "Darwin" ]; then
+        [[ $1 = /* ]] && echo "$arg" || echo "$(pwd)/${arg#./}"
+    else
+        readlink -f "$arg"
+    fi
+}
+
+######################################################################
+##                       Funciton Defination                        ##
 ######################################################################
 
 main() {
@@ -72,26 +98,36 @@ main() {
     local    hour_s=$(echo "$args" | sed -n 5p)       # hh:mi:ss
     local    date_e=$(echo "$args" | sed -n 6p)       # yyyy-mm-dd
     local    hour_e=$(echo "$args" | sed -n 7p)       # hh:mi:ss
-    local        AR=$(echo "$args" | sed -n 8p)       # A/Y/N, upper case
+    local      mode=$(echo "$args" | sed -n 8p)       # S/P/K/F/L, upper case
+    local        AR=$(echo "$args" | sed -n 9p)       # A/Y/N, upper case
+    local   mul_use=$(echo "$args" | sed -n 10p)      # MHM modeling duration
 
     local interval=$(get_ctrl "$ctrl_file" "Interval")
-    local site=$(grep "^ .... [KSF]" "$ctrl_file" | cut -c 2-5)
-    local mode=$(grep "^ .... [KSF]" "$ctrl_file" | cut -c 7-7)
+    local freq_cmb=$(get_ctrl "$ctrl_file" "Frequency combination")
+    local site=$(grep "^ .... [A-Z]" "$ctrl_file" | cut -c 2-5)
 
     local rinex_dir=$(dirname  "$rnxo_path")
     local rnxo_name=$(basename "$rnxo_path")
 
+    local mul=$(get_ctrl "$ctrl_file" "Multipath")
     # Output processing infomation
     echo -e "$MSGINF Processing time range: $date_s $hour_s <==> $date_e $hour_e"
     echo -e "$MSGINF Processing interval: $interval"
     echo -e "$MSGINF Site name: $site"
     echo -e "$MSGINF Positioning mode: $mode"
     echo -e "$MSGINF AR switch: $AR"
+    echo -e "$MSGINF Frequency combination: $freq_cmb"
     echo -e "$MSGINF Configuration file: $ctrl_path"
     echo -e "$MSGINF RINEX observation file: $rnxo_path"
 
-    local doy_s=$(date -d "$date_s" +"%j")
-    local doy_e=$(date -d "$date_e" +"%j")
+    
+    if [ "$OS" == "Darwin" ]; then
+        local doy_s=$(date -j -f "%Y-%m-%d" "$date_s" +"%j")
+        local doy_e=$(date -j -f "%Y-%m-%d" "$date_e" +"%j")
+    else
+        local doy_s=$(date -d "$date_s" +"%j")
+        local doy_e=$(date -d "$date_e" +"%j")
+    fi
     local ymd_s=($(echo "$date_s" | tr '-' ' '))
     local ymd_e=($(echo "$date_e" | tr '-' ' '))
     local mjd_s=$(ymd2mjd ${ymd_s[*]})
@@ -103,13 +139,24 @@ main() {
     if [ $mjd_span -lt 0 ]; then
         echo -e "$MSGERR illegal time span: from $mjd_s to $mjd_e"
         exit 1
-    elif [ $mjd_span -eq  0 ]; then
+    elif [ $mjd_span -eq   0 ]; then
         local work_dir="$proj_dir/$ymd_s/$doy_s"
-    elif [ $mjd_span -lt 32 ]; then
+    elif [ $mjd_span -lt 108 ]; then
         local work_dir="$proj_dir/$ymd_s/$doy_s-$doy_e"
-    elif [ $mjd_span -ge 32 ]; then
-        echo -e "$MSGERR too long time span (> 32 days): from $mjd_s to $mjd_e"
+    elif [ $mjd_span -ge 108 ]; then
+        echo -e "$MSGERR time span too long (> 108 days): from $mjd_s to $mjd_e"
         exit 1
+    fi
+
+    local mhm_dir="$work_dir/mhm"
+    if [[ "$mul" == "YES" ]]; then
+        mkdir -p "$mhm_dir" && cd "$mhm_dir"
+        if [ $? -eq 0 ]; then
+            PrepareMhmModel "$mjd_s" "$rnxo_path" "$ctrl_file" "$mhm_dir" "$mul_use" "$work_dir"\
+                || echo -e "$MSGERR from $ymd_s $doy_s to $ymd_e $doy_e preparing mhm model failed"
+        else
+            echo -e "$MSGERR no such directory: $mhm_dir"
+        fi
     fi
 
     mkdir -p "$work_dir" && cd "$work_dir"
@@ -133,11 +180,13 @@ ParseCmdArgs() { # purpose : parse command line into arguments
     readonly local SITE_REGEX="^[[:alpha:]0-9]{4}$"
     readonly local PNUM_REGEX="^[+.]?[0-9]+([.][0-9]+)?$"
 
-    local i s t iarg time_sec
+    local i s t iarg carg time_sec avail_num sys_num sys
     local rnxo_path rnxo_name rinex_dir ctrl_path ctrl_file
-    local ymd_s hms_s ymd_e hms_e site mode interval AR
-    local avail_sys edt_opt ztd_opt htg_opt ion_opt tide_mask lam_opt pco_opt
-    local gnss_mask map_opt ztdl ztdp htgp eloff
+    local ymd_s hms_s ymd_e hms_e site mode plen interval freq_cmb AR
+    local avail_sys edt_opt rck_opt ztd_opt htg_opt ion_opt tide_mask lam_opt pco_opt vbs_opt
+    local gnss_mask map_opt rckl rckp ztdl ztdp htgp eloff
+    local mul_use=0
+    local posp=0 twnd
 
     local last_arg=${@: -1}
     case $last_arg in
@@ -146,18 +195,19 @@ ParseCmdArgs() { # purpose : parse command line into arguments
     -H | --help )
         PRIDE_PPPAR_HELP && exit 1 ;;
     -* )
-        >&2 echo -e "$MSGERR invalid argument (the last argument should be obs-file): $last_arg"
-        >&2 echo -e "$MSGINF type ‘pdp3 -H’ or ‘pdp3 --help’ for more information"
+        >&2 echo -e "$MSGERR invalid argument (the last argument should be observation file): $last_arg"
+        >&2 echo -e "$MSGINF use ‘pdp3 -H’ or ‘pdp3 --help’ for more information"
         exit 1
     esac
 
     # Parse path of observation file
     if [ -e $last_arg ]; then
-        rnxo_path=$(readlink -f $last_arg)
+        rnxo_path=$(rdlk "$last_arg")
         rnxo_name=$(basename "$rnxo_path")
         rinex_dir=$(dirname  "$rnxo_path")
-        if ! head -1 "$last_arg" | grep -q "OBS"; then
-            >&2 echo -e "$MSGERR illegal observation file: $last_arg"
+        if [[ $(head -1 $last_arg | cut -c 21-21) != "O" ]]; then
+            >&2 echo -e "$MSGERR unsupported RINEX observation type: $last_arg"
+            >&2 echo -e "  $(head -1 $last_arg)"
             exit 1
         fi
     else
@@ -225,7 +275,7 @@ ParseCmdArgs() { # purpose : parse command line into arguments
                 [ -z "$ctrl_path" ]                             || throw_conflict_opt "$1"
                 check_optional_arg "$2" "$last_arg"             || throw_require_arg  "$1"
                 if [ -e "$2" ]; then
-                    ctrl_path="$(readlink -f $2)"
+                    ctrl_path="$(rdlk "$2")"
                 else
                     >&2 echo -e "$MSGERR PRIDE PPP-AR configuration file doesn't exist: $2"
                     exit 1
@@ -246,6 +296,30 @@ ParseCmdArgs() { # purpose : parse command line into arguments
                 done
                 shift 1
                 ;;
+            -frq | --frequency )
+                [ -z "$freq_cmb" ]                              || throw_conflict_opt "$1"
+                check_optional_arg "$2" "$last_arg"             || throw_require_arg  "$1"
+                while true; do
+                    sys_num=($(sed "s/./& /g" <<< "$2"))        || throw_invalid_arg "frequency number" "$2"
+                    [ "${#sys_num[@]}" -eq "3" ]                || throw_invalid_arg "frequency number" "$2"
+                    sys=$(echo "${sys_num[0]}" | tr 'a-z' 'A-Z')
+                    case "$sys" in
+                    "G" ) avail_num="125"    ;;
+                    "R" ) avail_num="12"     ;;
+                    "E" ) avail_num="15678"  ;;
+                    "C" ) avail_num="125678" ;;
+                    "J" ) avail_num="1256"   ;;
+                     *  ) throw_invalid_arg "frequency number" "$2" ;;
+                    esac
+                    echo "${freq_cmb[@]}" | grep -q "$sys"      && throw_conflict_opt "$2"
+                    echo "$avail_num" | grep -q "${sys_num[1]}" || throw_invalid_arg "frequency number" "$2"
+                    echo "$avail_num" | grep -q "${sys_num[2]}" || throw_invalid_arg "frequency number" "$2"
+                    freq_cmb+=($(echo "${sys_num[@]}" | sed "s/ //g" | tr 'a-z' 'A-Z'))
+                    shift 1
+                    check_optional_arg "$2" "$last_arg" || break
+                done
+                freq_cmb="${freq_cmb[@]}"
+                ;;
             -n | --site )
                 [ -z "$site" ]                                  || throw_conflict_opt "$1"
                 check_optional_arg "$2" "$last_arg"             || throw_require_arg  "$1"
@@ -255,12 +329,40 @@ ParseCmdArgs() { # purpose : parse command line into arguments
             -m | --mode )
                 [ -z "$mode" ]                                  || throw_conflict_opt "$1"
                 check_optional_arg "$2" "$last_arg"             || throw_require_arg  "$1"
-                carg=$(echo "$2" | tr 'a-z' 'A-Z')
+                carg=$(echo "$2" | cut -c 1 | tr 'a-z' 'A-Z')   || throw_invalid_arg "positioning mode" "$2"
                 case ${carg} in
-                @(S|K|F) ) mode="$carg" ;;
-                * ) throw_invalid_arg "mode" "$2" ;;
+                @(S|K|F|L) )
+                    mode="$carg" ;;
+                "P" )
+                    mode="$carg"
+                    plen=${2:1}
+                    [ -n "$plen" ] || plen="300"
+                    if [[ $plen =~ $PNUM_REGEX ]]                && \
+                       [[ $(echo "1 <= $plen" | bc) -eq 1 ]]; then
+                        plen=$(printf "%d" $[10#$plen])
+                        mode="$mode:$plen"
+                    else
+                        throw_invalid_arg "position piece length" "$plen"
+                    fi
+                    ;;
+                * ) throw_invalid_arg "positioning mode" "$2" ;;
                 esac
                 shift 1
+
+		posp=0
+		if check_optional_arg "$2" "$last_arg"; then
+		    if [[ $2 =~ $PNUM_REGEX  ]]              && \
+		       [[ $(echo "0.00 <= $2" |bc) -eq 1 ]]  && \
+                       [[ $(echo "$2 <= 100.0"|bc) -eq 1 ]]; then
+		       posp="$2"
+		       shift 1
+		    else
+		       posp=0
+	            fi	       
+                elif [[ "${mode:0:1}" == "P"  ]]; then
+                    posp=0.01                
+
+                fi
                 ;;
             -i | --interval )
                 [ -z "$interval" ]                              || throw_conflict_opt "$1"
@@ -271,6 +373,18 @@ ParseCmdArgs() { # purpose : parse command line into arguments
                     interval="$2"
                 else
                     throw_invalid_arg "interval" "$2"
+                fi
+                shift 1
+                ;;
+            -twnd | --time-window )
+                [ -z "$twnd" ]                                  || throw_conflict_opt "$1"
+                check_optional_arg "$2" "$last_arg"             || throw_require_arg  "$1"
+                if [[ $2 =~ $PNUM_REGEX ]]               && \
+                   [[ $(echo "0.0001 <= $2" | bc) -eq 1 ]] && \
+                   [[ $(echo "$2 <= 1.00" | bc) -eq 1 ]]; then
+                    twnd="$2" 
+                else
+                    throw_invalid_arg "cutoff elevation" "$2"
                 fi
                 shift 1
                 ;;
@@ -302,9 +416,50 @@ ParseCmdArgs() { # purpose : parse command line into arguments
                 [ -z "$ion_opt" ]                               || throw_conflict_opt "$1"
                 ion_opt="YES"
                 ;;
-            -hoff | --htg-off )
-                [ -z "$htg_off" ]                               || throw_conflict_opt "$1"
-                htg_opt="NON"
+            -mp | --multipath)
+                mul_opt="YES"
+                if [[ $2 =~ ^-?[0-9]+$ ]]; then
+                    mul_use=$2
+                    shift 1
+                else
+                    mul_use=0
+                fi
+                ;;
+            -h | --htg )
+                [ -z "$htg_opt" ]                               || throw_conflict_opt "$1"
+                check_optional_arg "$2" "$last_arg"             || throw_require_arg  "$1"
+                carg=$(echo "$2" | cut -c 1 | tr 'a-z' 'A-Z')   || throw_invalid_arg "HTG model" "$2"
+                case ${carg} in
+                "P" )
+                    htg_opt="PWC" && htgl=${2:1} && htgl=${htgl##*:}
+                    [ -n "$htgl" ] || htgl="720"
+                    if [[ $htgl =~ $PNUM_REGEX ]]              && \
+                       [[ $(echo "60 <= $htgl" | bc) -eq 1 ]]; then
+                        htg_opt="$htg_opt:$htgl"
+                    else
+                        throw_invalid_arg "HTG piece length" "$htgl"
+                    fi
+                    ;;
+                "S" )
+                    htg_opt="STO"
+                    ;;
+                "N" )
+                    htg_opt="NON"
+                    ;;
+                 *  )
+                    throw_invalid_arg "HTG model" "$2"
+                esac
+                shift 1
+                if check_optional_arg "$2" "$last_arg"; then
+                    if [[ $2 =~ $PNUM_REGEX ]]               && \
+                       [[ $(echo "0.00 <= $2" | bc) -eq 1 ]] && \
+                       [[ $(echo "$2 <= 10.0" | bc) -eq 1 ]]; then
+                        htgp="$2"
+                    else
+                        throw_invalid_arg "HTG process noise" "$2"
+                    fi
+                    shift 1
+                fi
                 ;;
             -p | --mapping-func )
                 [ -z "$map_opt" ]                               || throw_conflict_opt "$1"
@@ -319,6 +474,20 @@ ParseCmdArgs() { # purpose : parse command line into arguments
                 esac
                 shift 1
                 ;;
+            -r | --rck )
+                [ -z "$rck_opt" ]                               || throw_conflict_opt "$1"
+                rck_opt="STO"
+                if check_optional_arg "$2" "$last_arg"; then
+                    if [[ $2 =~ $PNUM_REGEX ]]               && \
+                       [[ $(echo "0.00 <= $2" | bc) -eq 1 ]] && \
+                       [[ $(echo "$2 <= 10.0" | bc) -eq 1 ]]; then
+                        rckp="$2"
+                    else
+                        throw_invalid_arg "clock process noise" "$2"
+                    fi
+                    shift 1
+                fi
+                ;;
             -toff | --tide-off )
                 [ -z "$tide_mask" ]                             || throw_conflict_opt "$1"
                 check_optional_arg "$2" "$last_arg"             || throw_require_arg  "$1"
@@ -331,6 +500,9 @@ ParseCmdArgs() { # purpose : parse command line into arguments
                     esac
                 done
                 shift 1
+                ;;
+            -v | --verbose )
+                vbs_opt="YES"
                 ;;
             -x | --fix-method )
                 [ -z "$lam_opt" ]                               || throw_conflict_opt "$1"
@@ -345,20 +517,23 @@ ParseCmdArgs() { # purpose : parse command line into arguments
             -z | --ztd )
                 [ -z "$ztd_opt" ]                               || throw_conflict_opt "$1"
                 check_optional_arg "$2" "$last_arg"             || throw_require_arg  "$1"
-                carg=$(echo "$2" | cut -c 1 | tr 'a-z' 'A-Z')
+                carg=$(echo "$2" | cut -c 1 | tr 'a-z' 'A-Z')   || throw_invalid_arg "ZTD model" "$2"
                 case ${carg} in
                 "P" )
                     ztd_opt="PWC" && ztdl=${2:1} && ztdl=${ztdl##*:}
                     [ -n "$ztdl" ] || ztdl="60"
                     if [[ $ztdl =~ $PNUM_REGEX ]]              && \
-                       [[ $(echo "60 <= $ztdl" | bc) -eq 1 ]]; then
-                        ztd_opt="${ztd_opt}:$ztdl"
+                       [[ $(echo " 1 <= $ztdl" | bc) -eq 1 ]]; then
+                        ztd_opt="$ztd_opt:$ztdl"
                     else
                         throw_invalid_arg "ZTD piece length" "$ztdl"
                     fi
                     ;;
                 "S" )
                     ztd_opt="STO"
+                    ;;
+                "N" )
+                    ztd_opt="NON"
                     ;;
                  *  )
                     throw_invalid_arg "ZTD model" "$2"
@@ -402,7 +577,7 @@ ParseCmdArgs() { # purpose : parse command line into arguments
         exit 1
     fi
 
-    local opt_lin=$(grep "^ .... [KSFX]" "$ctrl_path")
+    local opt_lin=$(grep "^ .... [A-Z] " "$ctrl_path")
     local opt_num=$(echo "$opt_lin" | wc -l)
     if [ $opt_num -ne 1 ]; then
         [ $opt_num -eq 0 ] && >&2 echo -e "$MSGERR no option line to be processed: $ctrl_path"
@@ -418,7 +593,65 @@ ParseCmdArgs() { # purpose : parse command line into arguments
         exit 1
     fi
 
-    # Try getting position mode option from config file
+    # Try getting frequency combinations from the config file
+    if [ -z "$freq_cmb" ]; then
+        freq_cmb=$(get_ctrl "$ctrl_file" "Frequency combination")
+        echo "$freq_cmb" | grep -q "WARNING" && freq_cmb=""
+        [ -n "$freq_cmb" ] && [ "$freq_cmb" != "Default" ] || freq_cmb="G12 R12 E15 C26 J12"
+    fi
+
+    freq_cmb=($(echo "$freq_cmb"))
+    for carg in ${freq_cmb[@]}; do
+        sys_num=($(sed "s/./& /g" <<< "$carg"))
+        if [ "${#sys_num[@]}" -ne "3" ]; then
+            >&2 echo -e "$MSGERR invalid frequency combination: $carg"
+            exit 1
+        fi
+        sys=$(echo "${sys_num[0]}" | tr 'a-z' 'A-Z')
+        case "$sys" in
+        "G" ) avail_num="125"    ;;
+        "R" ) avail_num="12"     ;;
+        "E" ) avail_num="15678"  ;;
+        "C" ) avail_num="125678" ;;
+        "J" ) avail_num="1256"   ;;
+         *  )
+            >&2 echo -e "$MSGERR invalid GNSS for specifying frequency combination: $carg"
+            exit 1
+            ;;
+        esac
+        for i in $(seq 1 2); do
+            if ! echo "$avail_num" | grep -q "${sys_num[$i]}"; then
+                >&2 echo -e "$MSGERR invalid frequency combination: $carg"
+                exit 1
+            fi
+        done
+    done
+
+    freq_cmb="${freq_cmb[@]}"
+    for sys in "G" "R" "E" "C" "J"; do
+        num=$(echo "$freq_cmb" | grep -o "$sys" | wc -l)
+        if [ "$num" -ge 2 ]; then
+            >&2 echo -e "$MSGERR repeated frequency combination for GNSS ($sys): $freq_cmb"
+            exit 1
+        elif [ "$num" -eq 0 ]; then
+            case "$sys" in
+            "G" ) carg="G12" ;;
+            "R" ) carg="R12" ;;
+            "E" ) carg="E15" ;;
+            "C" ) carg="C26" ;;
+            "J" ) carg="J12" ;;
+            esac
+            freq_cmb="$freq_cmb $carg"
+        fi
+    done
+
+    if grep -q "^Frequency combination" "$ctrl_file"; then
+        sedi "/^Frequency combination/s/ = .*/ = $freq_cmb/" "$ctrl_file"
+    else
+        sedi "/^Interval/i\\Frequency combination  = $freq_cmb" "$ctrl_file"
+    fi
+
+    # Positioning mode 
     if [ -z "$mode" ]; then
         mode=$(echo "$opt_lin" | cut -c 7-7)
         [ "$mode" == "X" ] && mode="K"
@@ -426,29 +659,35 @@ ParseCmdArgs() { # purpose : parse command line into arguments
 
     [ -n "$mode" ] && mode=$(echo $mode | tr 'a-z' 'A-Z') || mode="K"
 
+    # Get LEO satellie name form observation file and set site name
+    if [ "$mode" == "L" -a -z "$site" ]; then
+        site=$(grep "MARKER NAME" "$rnxo_path" | awk -v sep='-' '{print $1sep$2}')
+        [ -n "$site" ] && site="${site:0:3}${site: -1}"
+    fi
+
     # Default as MARKER NAME or the name of observation file
     if [ -z "$site" ]; then
         site=$(grep "MARKER NAME" "$rnxo_path" | awk '{print substr($0,0,4)}')
         if [[ ! "$site" =~ $SITE_REGEX ]]; then
-             if [[ $rnxo_name =~ ^[[:alpha:]0-9]{9}_.+O\.(rnx|RNX)$ ]] || \
-                [[ $rnxo_name =~ ^[[:alpha:]0-9]{4}[0-9]{3}.+\.[0-9]{2}(o|O)$ ]]; then
-                 site=${rnxo_name:0:4}
-             fi
+            if [[ $rnxo_name =~ ^[[:alpha:]0-9]{9}_.+O\.(rnx|RNX)$ ]] || \
+               [[ $rnxo_name =~ ^[[:alpha:]0-9]{4}[0-9]{3}.+\.[0-9]{2}(o|O)$ ]]; then
+                site=${rnxo_name:0:4}
+            fi
         fi
         if [ -z "$site" ]; then
             site=$(echo "$opt_lin" | cut -c 2-5)
             [ "$site" == "xxxx" ] && site=""
         fi
         if [[ ! "$site" =~ $SITE_REGEX ]]; then
-             >&2 echo -e "$MSGERR no valid site name from command or observation file"
-             >&2 echo -e "$MSGINF please input site name with option ‘-n’ or ‘--site’"
-             exit 1
+            >&2 echo -e "$MSGERR site name not found in command-line or observation file"
+            >&2 echo -e "$MSGINF please use the option ‘-n’ or ‘--site’ to input the site name"
+            exit 1
         fi
     fi
 
     [ -n "$site" ] && site=$(echo $site | tr 'A-Z' 'a-z') || site="xxxx"
 
-    # Default as the first epoch of the first observation file
+    # Default as the first epoch in the first observation file
     if [ -z "$ymd_s" ] || [ -z "$hms_s" ]; then
         time_sec=$(grep -E "^(> [ 0-9]{4} [ 0-1][0-9] | [ 0-9][0-9] [ 0-1][0-9] )" "$rnxo_path")
         local time=$(echo "$time_sec" | head -1)
@@ -461,8 +700,8 @@ ParseCmdArgs() { # purpose : parse command line into arguments
                 [ -z "$hms_s" ] && hms_s=$(echo "$time" | awk '{printf("%02d:%02d:%010.7f\n",$4,$5,$6)}')
             fi
         else
-            >&2 echo -e "$MSGERR no valid start time from command or observation file"
-            >&2 echo -e "$MSGINF please input start time with option ‘-s’ or ‘--start’"
+            >&2 echo -e "$MSGERR start time not found in command-line or observation file"
+            >&2 echo -e "$MSGINF please use the option ‘-s’ or ‘--start’ to input the start time"
             exit 1
         fi
     fi
@@ -473,34 +712,60 @@ ParseCmdArgs() { # purpose : parse command line into arguments
         # Check RINEX OBS files for multi-day processing
         local mjd_s=$(ymd2mjd $(echo "${ymd_s[*]}" | tr '-' ' '))
         local mjd_e=$(ymd2mjd $(echo "${ymd_e[*]}" | tr '-' ' '))
-        local doy_s=$(date -d "${ymd_s[*]}" +"%j")
-        local doy_e=$(date -d "${ymd_e[*]}" +"%j")
+        if [ "$OS" == "Darwin" ]; then
+            local doy_s=$(date -j -f "%Y-%m-%d" "$date_s" +"%j")
+            local doy_e=$(date -j -f "%Y-%m-%d" "$date_e" +"%j")
+        else
+            local doy_s=$(date -d "${ymd_s[*]}" +"%j")
+            local doy_e=$(date -d "${ymd_e[*]}" +"%j")
+        fi
 
-        readonly local RNXO2_GLOB="${rnxo_name:0:4}${doy_s}0.${ymd_s:2:2}@(o|O)"
-        readonly local RNXO3_GLOB="${rnxo_name:0:9}_?_${ymd_s:0:4}${doy_s}0000_01D_30S_MO.@(rnx|RNX)"
+        readonly local RNXO2D_GLOB="${rnxo_name:0:4}${doy_s}0.${ymd_s:2:2}@(o|O)"
+        readonly local RNXO2H_GLOB="${rnxo_name:0:4}${doy_s}[a-x].${ymd_s:2:2}@(o|O)"
+        readonly local RNXO3D_GLOB="${rnxo_name:0:9}_?_${ymd_s:0:4}${doy_s}0000_01D_???_?O.@(rnx|RNX)"
+        readonly local RNXO3H_GLOB="${rnxo_name:0:9}_?_${ymd_s:0:4}${doy_s}[0-9][0-9]00_01H_???_?O.@(rnx|RNX)"
 
+        local mjd hh hh_s hh_e al
         local tmpfobs tmpydoy
         for mjd in $(seq $mjd_s $mjd_e); do
             tmpydoy=($(mjd2ydoy $mjd))
             case "$rnxo_name" in
-            $RNXO2_GLOB )
+            $RNXO2D_GLOB )
                 tmpfobs="${rnxo_name:0:4}${tmpydoy[1]}0.${tmpydoy[0]:2:2}${rnxo_name:11}"
+                [ -f "$rinex_dir/$tmpfobs" ] || >&2 echo -e "$MSGWAR $rinex_dir/$tmpfobs doesn't exist"
                 ;;
-            $RNXO3_GLOB )
+            $RNXO2H_GLOB )
+                [ "$mjd" -eq "$mjd_s" ] && [ -n "$hms_s" ] && hh_s="${hms_s:0:2}" || hh_s="00"
+                [ "$mjd" -eq "$mjd_e" ] && [ -n "$hms_e" ] && hh_e="${hms_e:0:2}" || hh_e="23"
+                for hh in $(seq -w $hh_s $hh_e); do
+                    al=$(printf "\\x$(printf "%x" $[$(printf "%d" "'a")+$[10#$hh]])")
+                    tmpfobs="${rnxo_name:0:4}${tmpydoy[1]}${al}.${tmpydoy[0]:2:2}${rnxo_name:11}"
+                    [ -f "$rinex_dir/$tmpfobs" ] || >&2 echo -e "$MSGWAR $rinex_dir/$tmpfobs doesn't exist"
+                done
+                ;;
+            $RNXO3D_GLOB )
                 tmpfobs="${rnxo_name:0:12}${tmpydoy[0]}${tmpydoy[1]}${rnxo_name:19}"
+                [ -f "$rinex_dir/$tmpfobs" ] || >&2 echo -e "$MSGWAR $rinex_dir/$tmpfobs doesn't exist"
+                ;;
+            $RNXO3H_GLOB )
+                [ "$mjd" -eq "$mjd_s" ] && [ -n "$hms_s" ] && hh_s="${hms_s:0:2}" || hh_s="00"
+                [ "$mjd" -eq "$mjd_e" ] && [ -n "$hms_e" ] && hh_e="${hms_e:0:2}" || hh_e="23"
+                for hh in $(seq -w $hh_s $hh_e); do
+                    tmpfobs="${rnxo_name:0:12}${tmpydoy[0]}${tmpydoy[1]}${hh}${rnxo_name:21}"
+                    [ -f "$rinex_dir/$tmpfobs" ] || >&2 echo -e "$MSGWAR $rinex_dir/$tmpfobs doesn't exist"
+                done
                 ;;
             * )
                 tmpfobs="$rnxo_name"
-                >&2 echo -e "$MSGWAR unrecognized naming convention of RINEX observation file: $tmpfobs"
-                >&2 echo -e "$MSGINF error may occur if not enough observation data is contained in this single file"
+                >&2 echo -e "$MSGWAR illegal naming convention: $tmpfobs"
+                >&2 echo -e "$MSGINF please make ensure the RINEX observation file contains enough observation data to be processed"
                 break
                 ;;
             esac
-            [ -f "$rinex_dir/$tmpfobs" ] || >&2 echo -e "$MSGWAR $rinex_dir/$tmpfobs doesn't exist"
         done
     fi
 
-    # Default as the last epoch of the last observation file
+    # Default as the last epoch in the last observation file
     if [ -z "$ymd_e" ] || [ -z "$hms_e" ]; then
         time_sec=$(grep -E "^(> [0-9]{4} [ 0-1][0-9] | [ 0-9][0-9] [ 0-1][0-9] )" "$rinex_dir/$tmpfobs")
         local time=$(echo "$time_sec" | tail -1)
@@ -513,15 +778,20 @@ ParseCmdArgs() { # purpose : parse command line into arguments
                 [ -z "$hms_e" ] && hms_e=$(echo "$time" | awk '{printf("%02d:%02d:%010.7f\n",$4,$5,$6)}')
             fi
         else
-            >&2 echo -e "$MSGERR no valid end time from command or observation file"
-            >&2 echo -e "$MSGINF please input end time with option ‘-e’ or ‘--end’"
+            >&2 echo -e "$MSGERR end time not found in command-line or observation file"
+            >&2 echo -e "$MSGINF please use the option ‘-e’ or ‘--end’ to input the end time"
             exit 1
         fi
     fi
 
     # Check time span
-    local sec_s=$(date -d "$ymd_s $hms_s" +"%s.%2N")
-    local sec_e=$(date -d "$ymd_e $hms_e" +"%s.%2N")
+    if [ "$OS" == "Darwin" ]; then
+        local sec_s=$(date -j -f "%Y-%m-%d %H:%M:%S" "${ymd_s} ${hms_s%.*}" +"%s" | awk '{printf("%.3f", $1 + ("0." "'${hms_s#*.}'"))}')
+        local sec_e=$(date -j -f "%Y-%m-%d %H:%M:%S" "${ymd_e} ${hms_e%.*}" +"%s" | awk '{printf("%.3f", $1 + ("0." "'${hms_s#*.}'"))}')
+    else
+        local sec_s=$(date -d "$ymd_s $hms_s" +"%s.%3N")
+        local sec_e=$(date -d "$ymd_e $hms_e" +"%s.%3N")
+    fi
     local sspan=$(echo "$sec_e - $sec_s" | bc)
     if [[ $(echo "$sspan <= 0" | bc) -eq 1 ]]; then
         >&2 echo -e "$MSGERR illegal time span: from $ymd_s $hms_s to $ymd_e $hms_e"
@@ -529,14 +799,14 @@ ParseCmdArgs() { # purpose : parse command line into arguments
     fi
 
     local session_time="${ymd_s[@]//-/ } ${hms_s[@]//:/ } ${sspan}"
-    sed -i "/^Session time/s/ = .*/ = $session_time/" "$ctrl_file"
+    sedi "/^Session time/s/ = .*/ = $session_time/" "$ctrl_file"
 
-    # Try getting observation interval option from config file
+    # Try getting observation interval option from the config file
     [ -n "$interval" ] || interval=$(get_ctrl "$ctrl_file" "Interval")
     [ -z "$time_sec" ] && time_sec=$(grep -E "^(> [0-9]{4} [ 0-1][0-9] | [ 0-9][0-9] [ 0-1][0-9] )" "$rnxo_path")
-    local obsintvl=$(echo "$time_sec" | awk 'BEGIN{
+    local obsintvl=$(echo "$time_sec" | awk 'BEGIN {
                                                  mdif = 30
-                                             }{
+                                             } {
                                                  if ($1 == ">") {
                                                      this_sec = $5*3600+$6*60+$7
                                                  } else {
@@ -548,13 +818,13 @@ ParseCmdArgs() { # purpose : parse command line into arguments
                                                      if (vdif < mdif && vdif != 0) mdif = vdif
                                                  }
                                                  last_sec = this_sec
-                                             }END{
+                                             } END {
                                                  print(mdif)
                                              }')
 
     if [[ -n "$interval" ]] && [[ "$interval" != "Default" ]]; then
         if [[ $(echo "$interval < $obsintvl" | bc) -eq 1 ]]; then
-            >&2 echo -e "$MSGERR input interval is short than the observation interval: $interval < $obsintvl"
+            >&2 echo -e "$MSGERR input interval is shorter than observation interval: $interval < $obsintvl"
             exit 1
         fi
     else
@@ -566,46 +836,88 @@ ParseCmdArgs() { # purpose : parse command line into arguments
             last_dif=$(echo "$obsintvl" | awk '{print("'${last_can}'"-$0)}')
             this_dif=$(echo "$obsintvl" | awk '{print($0-"'${cand[$i]}'")}')
             if [[ $(echo "$last_dif < $this_dif" | bc) -eq 1 ]]; then
-               if [[ $(echo "$obsintvl == $last_can" | bc) -ne 1 ]]; then
-                  >&2 echo -e "$MSGWAR singular observation interval, rounded to the nearest candidate: $obsintvl -> $last_can"
-               fi
-               obsintvl="$last_can" && break
+                if [[ $(echo "$obsintvl == $last_can" | bc) -ne 1 ]]; then
+                    >&2 echo -e "$MSGWAR observation interval rounded to the nearest candidate: $obsintvl -> $last_can"
+                fi
+                obsintvl="$last_can" && break
             fi
         done
         interval="$obsintvl"
     fi
 
     if [[ $(echo "0.02 > $interval" | bc) -eq 1 ]]; then
-       >&2 echo -e "$MSGWAR observation interval is too small, rounded to the nearest candidate: $interval -> 0.02"
+       >&2 echo -e "$MSGWAR observation interval too small, rounded to the minimum candidate: $interval -> 0.02"
        interval="0.02"
     fi
 
     if [[ $(echo "$interval > 300.0" | bc) -eq 1 ]]; then
-       >&2 echo -e "$MSGWAR observation interval is too large, rounded to the nearest candidate: $interval -> 300.0"
+       >&2 echo -e "$MSGWAR observation interval too large, rounded to the maximum candidate: $interval -> 300.0"
        interval="300.0"
     fi
 
-    sed -i "/^Interval/s/ = .*/ = $interval/" "$ctrl_file"
+    sedi "/^Interval/s/ = .*/ = $interval/" "$ctrl_file"
+    [ -z "$twnd" ] && twnd=0.01
+    sedi "/^Time window/s/ = .*/ = $twnd/" "$ctrl_file"    
+
+    # Piece length for PWC mode
+    if [ -z "$plen" ]; then
+        plen=$(echo "$opt_lin" | awk '{print($13)}')
+        [[ ! $plen =~ $PNUM_REGEX ]] && plen="300"
+    fi
+
+    if [ "${mode:0:1}" == "P" ]; then
+        if [[ $(echo "$plen < $interval" | bc) -eq 1 ]]; then
+            >&2 echo -e "$MSGERR piece-length shorter than observation interval: $plen < $interval"
+            exit 1
+        fi
+        if [[ $(echo "$plen > $sspan" | bc) -eq 1 ]]; then
+            >&2 echo -e "$MSGWAR piece-length longer than observation period: $plen > $sspan"
+        fi
+    fi
 
     # Editing mode
     [ -n "$edt_opt" ] || edt_opt=$(get_ctrl "$ctrl_file" "Strict editing")
     [ "$edt_opt" == "Default" ] && edt_opt="YES"
-    sed -i "/^Strict editing/s/ = .*/ = $edt_opt/" "$ctrl_file"
+    sedi "/^Strict editing/s/ = .*/ = $edt_opt/" "$ctrl_file"
 
-    [ "$edt_opt" == "YES" ] && min_sspan="600.0" || min_sspan="120.0"
+    [ "$edt_opt" == "YES" ] && min_sspan="600.0" || min_sspan="30.0"
     if [[ $(echo "$sspan < $min_sspan" | bc) -eq 1 ]]; then
-        >&2 echo -e "$MSGERR observation period is too short: $sspan < $min_sspan"
+        >&2 echo -e "$MSGERR observation period too short: $sspan < $min_sspan"
         exit 1
+    fi
+
+    # RCK model
+    [ -n "$rck_opt" ] || rck_opt=$(get_ctrl "$ctrl_file" "RCK model")
+    [ "$rck_opt" == "Default" ] && rck_opt="WNO"
+
+    sedi "/^RCK model/s/ = .*/ = $rck_opt/" "$ctrl_file"
+
+    if [ -z "$rckp" ]; then
+        local rckp=$(echo "$opt_lin" | awk '{print($5)}')
+        if [[ ! $rckp =~ $PNUM_REGEX ]]; then
+            case ${rck_opt:0:3} in
+            "STO" ) rckp="0.001" ;;
+            "WNO" ) rckp="0.000" ;;
+              *   ) rckp="0.000" ;;
+            esac
+        fi
     fi
 
     # ZTD model
     [ -n "$ztd_opt" ] || ztd_opt=$(get_ctrl "$ctrl_file" "ZTD model")
+
+    if [ "$mode" == "L" -a "$ztd_opt" != "NON" ]; then
+        [ "$ztd_opt" != "Default" ] && \
+            >&2 echo -e "$MSGWAR disable ZTD model for LEO satellite: $ztd_opt -> NON"
+        ztd_opt="NON"
+    fi
+
     [ "$ztd_opt" == "Default" ] && ztd_opt="STO"
 
-    sed -i "/^ZTD model/s/ = .*/ = $ztd_opt/" "$ctrl_file"
+    sedi "/^ZTD model/s/ = .*/ = $ztd_opt/" "$ctrl_file"
 
     if [ -z "$ztdp" ]; then
-        local ztdp=$(echo "$opt_lin" | awk '{print($7)}')
+        local ztdp=$(echo "$opt_lin" | awk '{print($8)}')
         if [[ ! $ztdp =~ $PNUM_REGEX ]]; then
             case ${ztd_opt:0:3} in
             "STO" ) ztdp=".0004" ;;
@@ -619,29 +931,44 @@ ParseCmdArgs() { # purpose : parse command line into arguments
 
     # HTG model
     [ -n "$htg_opt" ] || htg_opt=$(get_ctrl "$ctrl_file" "HTG model")
+
+    if [ "$mode" == "L" -a "$htg_opt" != "NON" ]; then
+        [ "$htg_opt" != "Default" ] && \
+            >&2 echo -e "$MSGWAR disable HTG model for LEO satellite: $htg_opt -> NON"
+        ztd_opt="NON"
+    fi
+
     if [ "$htg_opt" == "Default" ]; then
         [ "$mode" == "F" -o $mode == "S" ] && htg_opt="PWC:720" || htg_opt="NON"
     fi
 
-    sed -i "/^HTG model/s/ = .*/ = $htg_opt/" "$ctrl_file"
+    sedi "/^HTG model/s/ = .*/ = $htg_opt/" "$ctrl_file"
 
     if [ -z "$htgp" ]; then
-        local htgp=$(echo "$opt_lin" | awk '{print($9)}')
-        [[ $htgp =~ $PNUM_REGEX ]] || htgp=".002"
+        local htgp=$(echo "$opt_lin" | awk '{print($10)}')
+        if [[ ! $htgp =~ $PNUM_REGEX ]]; then
+            case ${htg_opt:0:3} in
+            "STO" ) htgp=".0004" ;;
+            "PWC" ) htgp="0.002" ;;
+              *   ) htgp="0.002" ;;
+            esac
+        fi
     fi
 
-    htgp=$(printf "%4s" $htgp)
+    htgp=$(printf "%5s" $htgp)
 
     # High-order ionospheric delay model
     [ -n "$ion_opt" ] || ion_opt=$(get_ctrl "$ctrl_file" "Iono 2nd")
     [ "$ion_opt" == "Default" ] && ion_opt="NO"
-    sed -i "/^Iono 2nd/s/ = .*/ = $ion_opt/" "$ctrl_file"
+    sedi "/^Iono 2nd/s/ = .*/ = $ion_opt/" "$ctrl_file"
 
     # Tide correction model
     local tide_mode
     if [ -z "$tide_mask" ]; then
         tide_mode=$(get_ctrl "$ctrl_file" "Tides")
-        [ "$tide_mode" == "Default" ] && tide_mode="SOLID/OCEAN/POLE"
+        if [ "$tide_mode" == "Default" ]; then
+            [ "$mode" == "L" ] && tide_mode="NON" || tide_mode="SOLID/OCEAN/POLE"
+        fi
     else
         tide_mode=("SOLID" "OCEAN" "POLE")
         for t in ${tide_mask[@]}; do
@@ -654,7 +981,21 @@ ParseCmdArgs() { # purpose : parse command line into arguments
         [ -n "$tide_mode" ] || tide_mode="NON"
     fi
 
-    sed -i "/^Tides/s/ = .*/ = ${tide_mode//\//\\/}/" "$ctrl_file"
+    if [ "$mode" == "L" -a "$tide_mode" != "NON" ]; then
+        >&2 echo -e "$MSGWAR disable tidal correction for LEO satellite: $tide_mode -> NON"
+        tide_mode="NON"
+    fi
+
+    sedi "/^Tides/s/ = .*/ = ${tide_mode//\//\\/}/" "$ctrl_file"
+
+    # Multipath correction (default as NO)
+    [ -n "$mul_opt" ] || mul_opt=$(get_ctrl "$ctrl_file" "Multipath")
+    [[ "$mul_opt" == "YES" ]] || mul_opt="NO"
+    sedi "/^Multipath/s/ = .*/ = $mul_opt/" "$ctrl_file"
+    if [ "$mode" == "L" ] && [ "$mul_opt" == "YES" ]; then
+        >&2 echo -e "$MSGERR mhm cannot be applied to LEO satellite"
+        exit 1
+    fi
 
     # Ambiguity resolution
     [ -n "$AR" ] || AR="A"
@@ -662,14 +1003,21 @@ ParseCmdArgs() { # purpose : parse command line into arguments
     [ -n "$lam_opt" ] || lam_opt=$(get_ctrl "$ctrl_file" "Ambiguity co-var")
     if [ "$lam_opt" == "Default" ]; then
         ## max observation time set for LAMBDA is 6 hours
-        [[ $(echo "$sspan <= 21600.0" | bc) -eq 1 ]] && lam_opt="YES" || lam_opt="NO"
+        [[ $(echo "$sspan <= 21600.0" | bc) -eq 1 ]] && lam_opt="YES"     || lam_opt="NO"
+        [ "$mode" == "L" ] && [[ $(echo "$sspan >= 3600.0" | bc) -eq 1 ]] && lam_opt="NO"
     fi
 
-    sed -i "/^Ambiguity co-var/s/ = .*/ = $lam_opt/" "$ctrl_file"
+    sedi "/^Ambiguity co-var/s/ = .*/ = $lam_opt/" "$ctrl_file"
 
-    # PCO on wide-lane
-    [ -n "$pco_opt" ] || pco_opt=$(get_ctrl "$ctrl_file" "PCO on wide-lane")
-    sed -i "/^PCO on wide-lane/s/ = .*/ = $pco_opt/" "$ctrl_file"
+    # PCO on wide-lane (default as YES)
+    [ -n "$pco_opt" ] || pco_opt=$(get_ctrl "$ctrl_file" "PCO on wide-lane" | tr 'a-z' 'A-Z')
+    [[ "$pco_opt" == "NO" ]] || pco_opt="YES"
+    sedi "/^PCO on wide-lane/s/ = .*/ = $pco_opt/" "$ctrl_file"
+
+    # Verbose output (default as NO)
+    [ -n "$vbs_opt" ] || vbs_opt=$(get_ctrl "$ctrl_file" "Verbose output" | tr 'a-z' 'A-Z')
+    [[ "$vbs_opt" == "YES" ]] || vbs_opt="NO"
+    sedi "/^Verbose output/s/ = .*/ = $vbs_opt/" "$ctrl_file"
 
     # GNSS
     for s in ${gnss_mask[@]}; do
@@ -680,7 +1028,7 @@ ParseCmdArgs() { # purpose : parse command line into arguments
          *  ) prn_mask=($(seq -f "$s%02g"  1 99)) ;;
         esac
         for prn in ${prn_mask[@]}; do
-            sed -i "/^ $prn /s/^ /#/" "$ctrl_file"
+            sedi "/^ $prn /s/^ /#/" "$ctrl_file"
         done
     done
 
@@ -689,26 +1037,35 @@ ParseCmdArgs() { # purpose : parse command line into arguments
 
     # Mapping function
     [ -n "$map_opt" ] || map_opt=$(echo "$opt_lin" | awk '{print($3)}')
+
+    if [ "$mode" == "L" -a "$map_opt" != "NON" ]; then
+        [ "$map_opt" != "Default" ] && \
+            >&2 echo -e "$MSGWAR disable mapping function for LEO satellite: $map_opt -> NON"
+        map_opt="NON"
+    fi
+
     [ "$map_opt" == "XXX" ] && map_opt="GMF"
 
     # Cutoff elevation
-    [ -n "$eloff" ] || eloff=$(echo "$opt_lin" | awk '{print($5)}')
-    [[ $eloff =~ $PNUM_REGEX ]] || eloff="7"
+    [ -n "$eloff" ] || eloff=$(echo "$opt_lin" | awk '{print($6)}')
+    if [[ ! $eloff =~ $PNUM_REGEX ]]; then
+        [ "$mode" == "L" ] && eloff="0" || eloff="7"
+    fi
 
     eloff=$(echo "$eloff" | awk '{printf("%2d",$0)}')
 
     # Modify option line
     local clkm=$(echo "$opt_lin" | awk '{print($4)}')
-    local ztdm=$(echo "$opt_lin" | awk '{print($6)}')
-    local htgm=$(echo "$opt_lin" | awk '{print($8)}')
-    local ragm=$(echo "$opt_lin" | awk '{print($10)}')
-    local phsc=$(echo "$opt_lin" | awk '{print($11)}')
-    local poxm=$(echo "$opt_lin" | awk '{print($12)}')
-    local poym=$(echo "$opt_lin" | awk '{print($13)}')
-    local pozm=$(echo "$opt_lin" | awk '{print($14)}')
+    local ztdm=$(echo "$opt_lin" | awk '{print($7)}')
+    local htgm=$(echo "$opt_lin" | awk '{print($9)}')
+    local ragm=$(echo "$opt_lin" | awk '{print($11)}')
+    local phsc=$(echo "$opt_lin" | awk '{print($12)}')
+    local poxm=$(echo "$opt_lin" | awk '{print($14)}')
+    local poym=$(echo "$opt_lin" | awk '{print($15)}')
+    local pozm=$(echo "$opt_lin" | awk '{print($16)}')
 
-    opt_lin=" $site $mode  $map_opt $clkm $eloff $ztdm $ztdp $htgm $htgp $ragm $phsc $poxm $poym $pozm"
-    sed -i "s/^ .... [KSFX] .*/$opt_lin/" "$ctrl_file"
+    opt_lin=" $site ${mode:0:1}  $map_opt $clkm $rckp $eloff $ztdm $ztdp $htgm $htgp $ragm $phsc $plen $poxm $poym $pozm $posp"
+    sedi "s/^ .... [A-Z] .*/$opt_lin/" "$ctrl_file"
 
     # Return
     echo "$rnxo_path"
@@ -718,64 +1075,59 @@ ParseCmdArgs() { # purpose : parse command line into arguments
     echo "${hms_s:0:12}"
     echo "$ymd_e"
     echo "${hms_e:0:12}"
+    echo "$mode"
     echo "$AR"
+    echo "$mul_use"
 }
 
-check_optional_arg(){ # purpose : check if optional argument is existing
-                      # usage   : check_optional_arg this_arg last_arg
+check_optional_arg() { # purpose : check if optional argument is existing
+                       # usage   : check_optional_arg this_arg last_arg
     local this_arg=$1
     local last_arg=$2
-
     [[ -z $this_arg ]] && return 1
     [[ $this_arg =~ ^-{1,2}   ]] && return 1
     [[ $this_arg == $last_arg ]] && return 1
     return 0
 }
 
-throw_conflict_opt(){ # purpose : throw exception message and exit when option conflicts with a previous option
-                      # usage   : throw_invalid_arg opt
+throw_conflict_opt() { # purpose : throw exception message and exit when option conflicts with a previous option
+                       # usage   : throw_invalid_arg opt
     local opt=$1
-
     >&2 echo "$SCRIPT_NAME: conflicting option '$opt'"
     >&2 echo "Try '$SCRIPT_NAME --help' for more information."
     exit 1
 }
 
-throw_invalid_arg(){ # purpose : throw exception message and exit when option got an invalid argument
-                     # usage   : throw_invalid_arg optlable argument
+throw_invalid_arg() { # purpose : throw exception message and exit when option got an invalid argument
+                      # usage   : throw_invalid_arg optlable argument
     local optlable=$1
     local argument=$2
-
     >&2 echo "$SCRIPT_NAME: invalid $optlable: ‘$argument’"
     >&2 echo "Try '$SCRIPT_NAME --help' for more information."
     exit 1
 }
 
-throw_invalid_opt(){ # purpose : throw exception message and exit when an invalid option occurs
-                     # usage   : throw_invalid_opt opt
+throw_invalid_opt() { # purpose : throw exception message and exit when an invalid option occurs
+                      # usage   : throw_invalid_opt opt
     local opt=$1
-
     case $opt in
     --+([-[:alnum:]_]) ) local detail="unrecognized option '${opt}'" ;;
      -+([-[:alnum:]_]) ) local detail="invalid option -- '${opt:1}'" ;;
       * )                local detail="invalid argument -- '${opt}'" ;;
     esac
-
     >&2 echo "$SCRIPT_NAME: $detail"
     >&2 echo "Try '$SCRIPT_NAME --help' for more information."
     exit 1
 }
 
-throw_require_arg(){ # purpose : throw exception message and exit when option did not get its argument
-                     # usage   : throw_require_arg opt
+throw_require_arg() { # purpose : throw exception message and exit when option did not get its argument
+                      # usage   : throw_require_arg opt
     local opt=$1
-
     case $opt in
     --+([-[:alnum:]_]) ) local detail="option '${opt:0}' requires an argument"    ;;
      -+([-[:alnum:]_]) ) local detail="option requires an argument -- '${opt:1}'" ;;
       * )                local detail="invalid argument -- '${opt:0}'"            ;;
     esac
-
     >&2 echo "$SCRIPT_NAME: $detail"
     >&2 echo "Try '$SCRIPT_NAME --help' for more information."
     exit 1
@@ -784,18 +1136,18 @@ throw_require_arg(){ # purpose : throw exception message and exit when option di
 CheckExecutables() { # purpose : check whether all needed executables are callable
                      # usage   : CheckExecutables
     echo -e "$MSGSTA CheckExecutables ..."
-    for exceu in "arsig" "get_ctrl" "lsq" "redig" "sp3orb" "spp" "tedit"; do
+    for exceu in "arsig" "get_ctrl" "lsq" "redig" "sp3orb" "spp" "tedit" "otl" "mhm"; do
         if ! which $exceu > /dev/null 2>&1; then
             echo -e "$MSGERR PRIDE PPP-AR executable file $exceu not found"
             return 1
         fi
     done
-    for exceu in "merge2brdm.py" "pbopos" "xyz2enu"; do
+    for exceu in "leoatx.py" "merge2brdm.py" "pbopos" "pso2kin.py" "xyz2enu"; do
         if ! which $exceu > /dev/null 2>&1; then
             echo -e "$MSGWAR PRIDE PPP-AR executable file $exceu not found"
         fi
     done
-    for exceu in "awk" "diff" "readlink" "sed"; do
+    for exceu in "awk" "diff" "sed"; do
         if ! which $exceu > /dev/null 2>&1; then
             echo -e "$MSGERR system tool $exceu not found"
             return 1
@@ -811,15 +1163,15 @@ CheckExecutables() { # purpose : check whether all needed executables are callab
 
 PRIDE_PPPAR_INFO() { # purpose : print information for PRIDE PPP-AR
                      # usage   : PRIDE_PPPAR_INFO
-    >&2 echo "© GNSS Research Center of Wuhan University, 2022"
-    >&2 echo "  GNSS PPP&PPP-AR data processing with PRIDE PPP-AR version $VERSION_NUM"
+    >&2 echo "© GNSS Research Center of Wuhan University, 2023"
+    >&2 echo "  GNSS PPP & PPP-AR data processing with PRIDE PPP-AR version $VERSION_NUM"
 }
 
 PRIDE_PPPAR_HELP() { # purpose : print usage for PRIDE PPP-AR
                      # usage   : PRIDE_PPPAR_HELP
     >&2 echo "Usage: $SCRIPT_NAME [options] <obs-file>"
     >&2 echo ""
-    >&2 echo "  All char type arguments could be either upper-case or lower-case"
+    >&2 echo "  All character type arguments could be upper-case or lower-case"
     >&2 echo ""
     >&2 echo "Start up:"
     >&2 echo ""
@@ -829,7 +1181,7 @@ PRIDE_PPPAR_HELP() { # purpose : print usage for PRIDE PPP-AR
     >&2 echo ""
     >&2 echo "Common options:"
     >&2 echo ""
-    >&2 echo "  -cfg <file>, --config <file>               configuration file for PRIDE PPP-AR 2"
+    >&2 echo "  -cfg <file>, --config <file>               configuration file for PRIDE PPP-AR 3"
     >&2 echo ""
     >&2 echo "  -sys <char>, --system <char>               GNSS to be processed, select one or more from \"GREC23J\":"
     >&2 echo "                                             -----+------------------------+-----+-------------------------"
@@ -840,43 +1192,96 @@ PRIDE_PPPAR_HELP() { # purpose : print usage for PRIDE PPP-AR
     >&2 echo "                                             -----+------------------------+-----+-------------------------"
     >&2 echo "                                               * default: all GNSS"
     >&2 echo ""
-    >&2 echo "  -m <char>, --mode <char>                   positioning mode, select one from \"K/S/F\":"
+    >&2 echo "  -frq <char>, --frequency <char>            frequencies to form ionosphere-free combination, select from:"
+    >&2 echo "                                             -----+-------+-------+-------+-------+-------+-------+--------"
+    >&2 echo "                                                  |   1   |   2   |   5   |   6   |   7   |   8   |        "
+    >&2 echo "                                             -----+-------+-------+-------+-------+-------+-------+--------"
+    >&2 echo "                                               G  |  L1   |  L2   |  L5   |       |       |       |        "
+    >&2 echo "                                               R  |  L1   |  L2   |       |       |       |       |        "
+    >&2 echo "                                               E  |  E1   |       |  E5a  |  E6   |  E5b  |  E5   |        "
+    >&2 echo "                                               C  |  B1C  |  B1I  |  B2a  |  B3I  |  B2b  |  B2   |        "
+    >&2 echo "                                               J  |  L1   |  L2   |  L5   |  L6   |       |       |        "
+    >&2 echo "                                             -----+-------+-------+-------+-------+-------+-------+--------"
+    >&2 echo "                                               input as: \"G12 R12 E15 C26 J12\" (default setting)"
+    >&2 echo ""
+    >&2 echo "  -m <char[length] [constraint]>, --mode <char[length] [constraint]>"   
+    >&2 echo "                                             positioning mode, select one from \"S/P/K/F/L\":"
     >&2 echo "                                             -----+--------------+-----+--------------+-----+--------------"
-    >&2 echo "                                               S  |  static      |  K  | kinematic    |  F  |  fixed       "
+    >&2 echo "                                               S  |  static      |  P  | piece-wise   |  K  |  kinematic   "
     >&2 echo "                                             -----+--------------+-----+--------------+-----+--------------"
+    >&2 echo "                                               F  |  fixed       |  L  | LEO sat      |     |              "
+    >&2 echo "                                             -----+--------------+-----+--------------+-----+--------------"
+    >&2 echo "                                               * default: kinematic mode (K)"
+    >&2 echo "                                               * length and constraint arguments applied for P mode only, "
+    >&2 echo "                                                   the unit of length is seconds,  "
+    >&2 echo "                                                   and the constraint is m/sqrt(s)."
+    >&2 echo "                                               * P mode default as P300 0.001 "
+    >&2 echo "                                                   (PWC model with length as 300 s, and constraint as "
+    >&2 echo "                                                   0.001 m/sqrt(s))"
+    >&2 echo ""
     >&2 echo ""
     >&2 echo "  -s <date [time]>, --start <date [time]>    start date (and time) for processing, format:"
     >&2 echo "                                             --------+--------------------------+--------+-----------------"
     >&2 echo "                                               date  |  yyyy/mm/dd or yyyy/doy  |  time  |  hh:mm:ss       "
     >&2 echo "                                             --------+--------------------------+--------+-----------------"
-    >&2 echo "                                               * default: the first observation epoch in obs-file"
+    >&2 echo "                                               * default: first observation epoch in the obs-file"
     >&2 echo ""
     >&2 echo "  -e <date [time]>, --end <date [time]>      end date (and time) for processing, format:"
     >&2 echo "                                             --------+--------------------------+--------+-----------------"
     >&2 echo "                                               date  |  yyyy/mm/dd or yyyy/doy  |  time  |  hh:mm:ss       "
     >&2 echo "                                             --------+--------------------------+--------+-----------------"
-    >&2 echo "                                               * default: the last observation epoch in obs-file"
+    >&2 echo "                                               * default: last observation epoch in the obs-file"
     >&2 echo ""
     >&2 echo "  -n <char>, --site <char>                   site name for processing, format: NNNN"
-    >&2 echo "                                               * default: the MARKER NAME in obs-file, or the first four"
-    >&2 echo "                                                   characters of the filename in RINEX naming convention"
+    >&2 echo "                                               * default: MARKER NAME in the obs-file, or the first four"
+    >&2 echo "                                                   characters of the RINEX filename"
     >&2 echo ""
     >&2 echo "  -i <num>,  --interval <num>                processing interval in seconds, 0.02 <= interval <= 300"
-    >&2 echo "                                               * default: the minimal observation interval in obs-file"
+    >&2 echo "                                               * default: minimal observation interval in the obs-file"
     >&2 echo ""
     >&2 echo "Advanced options:"
     >&2 echo ""
     >&2 echo "  -aoff, --wapc-off                          disable APC correction on the Melbourne-Wubbena combination"
     >&2 echo ""
-    >&2 echo "  -c <num>,  --cutoff-elev <num>             cutoff elevation in degrees, 0 <= elevation <=60"
+    >&2 echo "  -c <num>, --cutoff-elev <num>              cutoff elevation in degrees, 0 <= elevation <=60"
     >&2 echo "                                               * default: 7 degrees"
     >&2 echo ""
     >&2 echo "  -f, --float                                disable ambiguity resolution"
     >&2 echo ""
+    >&2 echo "  -h <char[length] [num]>, --htg <char[length] [num]>"
+    >&2 echo "                                             HTG model, piece length and process noise:"
+    >&2 echo "                                                  input      model     length          process noise       "
+    >&2 echo "                                             --------------+-------+-----------+---------------------------"
+    >&2 echo "                                               S    .0010  |  STO  |           |      0.0010 m/sqrt(s)     "
+    >&2 echo "                                               S           |  STO  |           |      0.0004 m/sqrt(s)     "
+    >&2 echo "                                               P720        |  PWC  |  720 min  |      0.002  m/sqrt(h)     "
+    >&2 echo "                                               P60  0.004  |  PWC  |   60 min  |      0.004  m/sqrt(h)     "
+    >&2 echo "                                               P           |  PWC  |  720 min  |      0.002  m/sqrt(h)     "
+    >&2 echo "                                               N           |  NON  |           |                           "
+    >&2 echo "                                             --------------+-------+-----------+---------------------------"
+    >&2 echo "                                               * HTG - horizontal tropospheric gradient"
+    >&2 echo "                                               * STO - stochastic walk"
+    >&2 echo "                                               * PWC - piece-wise constant"
+    >&2 echo "                                               * NON - none"
+    >&2 echo "                                               * default: PWC model with process noise as 0.002 m/sqrt(h)"
+    >&2 echo "                                                   for static and fixed mode, NON for the other modes"
+    >&2 echo ""
     >&2 echo "  -hion, --high-ion                          use 2nd ionospheric delay model with CODE's GIM products"
     >&2 echo ""
-    >&2 echo "  -hoff, --htg-off                           disable horizontal tropospheric gradient (HTG) estimation"
-    >&2 echo "                                               * HTG is applied for static and fixed mode by default"
+    >&2 echo "  -mp [num], --multipath [num]               use the multipath correction model (MHM)"
+    >&2 echo "                                               * default: 0 day"
+    >&2 echo "                                                   additional modeling time in day beyond one sidereal cycle"
+    >&2 echo "                                               * NOTE"
+    >&2 echo "                                                   observation files for the sidereal cycle are required at least"
+    >&2 echo "                                                                constellation        sidereal cycle(day)   "
+    >&2 echo "                                                              -----------------+---------------------------"
+    >&2 echo "                                                                     GPS       |             1             "
+    >&2 echo "                                                                   Galileo     |             10            "
+    >&2 echo "                                                                     BDS       |             7             "
+    >&2 echo "                                                                   GLONASS     |             8             "
+    >&2 echo "                                                                     QZSS      |             1             "
+    >&2 echo "                                                              -----------------+---------------------------"
+    >&2 echo "                                                   all observation files need to be placed in the same folder"    
     >&2 echo ""
     >&2 echo "  -l, --loose-edit                           disable strict editing"
     >&2 echo ""
@@ -887,11 +1292,23 @@ PRIDE_PPPAR_HELP() { # purpose : print usage for PRIDE PPP-AR
     >&2 echo "                                             -------+-----------------------+------+-----------------------"
     >&2 echo "                                               * default: global mapping function (G)"
     >&2 echo ""
+    >&2 echo "  -r [num], --rck [num]                      change receiver clock model as STO and set process noise."
+    >&2 echo "                                               * STO - stochastic walk"
+    >&2 echo "                                               * the unit of process noise is m/sqrt(s)"
+    >&2 echo "                                               * default: 0.0010 m/sqrt(s)"
+    >&2 echo ""
+    >&2 echo "  -twnd <num>,  --time-window <num>          processing time window in seconds, for not standard or super "
+    >&2 echo "                                               high rate rinex obs."
+    >&2 echo "                                               *  0.0001 <= time-window <= 1"
+    >&2 echo "                                               * default: 0.01 seconds"
+    >&2 echo ""
     >&2 echo "  -toff <char>, --tide-off <char>            disable tide correction, select one or more from \"SOP\":"
     >&2 echo "                                             -----+--------------+-----+--------------+-----+--------------"
     >&2 echo "                                               S  |  solid       |  O  | ocean        |  P  |  pole        "
     >&2 echo "                                             -----+--------------+-----+--------------+-----+--------------"
     >&2 echo "                                               * default: apply all tide corrections"
+    >&2 echo ""
+    >&2 echo "  -v, --verbose                              output details of ambiguity resolution"
     >&2 echo ""
     >&2 echo "  -x <num>, --fix-method <num>               ambiguity fixing method, choose 1 or 2:"
     >&2 echo "                                             -----+------------------------+-----+-------------------------"
@@ -909,10 +1326,12 @@ PRIDE_PPPAR_HELP() { # purpose : print usage for PRIDE PPP-AR
     >&2 echo "                                               P720        |  PWC  |  720 min  |      0.02   m/sqrt(h)     "
     >&2 echo "                                               P60  0.040  |  PWC  |   60 min  |      0.04   m/sqrt(h)     "
     >&2 echo "                                               P           |  PWC  |   60 min  |      0.02   m/sqrt(h)     "
+    >&2 echo "                                               N           |  NON  |           |                           "
     >&2 echo "                                             --------------+-------+-----------+---------------------------"
     >&2 echo "                                               * ZTD - zenith total delay of troposphere"
     >&2 echo "                                               * STO - stochastic walk"
     >&2 echo "                                               * PWC - piece-wise constant"
+    >&2 echo "                                               * NON - none"
     >&2 echo "                                               * default: STO model with process noise as .0004 m/sqrt(s)"
     >&2 echo ""
     >&2 echo "Examples:"
@@ -921,7 +1340,7 @@ PRIDE_PPPAR_HELP() { # purpose : print usage for PRIDE PPP-AR
     >&2 echo ""
     >&2 echo "  pdp3 -s 2020/1 -e 2020/3 abmf0010.20o      multi-day processing from 2020/001 to 2020/003"
     >&2 echo ""
-    >&2 echo "  For more detailed information, refer to the PRIDE PPP-AR manual and repository"
+    >&2 echo "  More details refer to PRIDE PPP-AR manual and repository"
     >&2 echo "    https://github.com/PrideLab/PRIDE-PPPAR/"
 }
 
@@ -936,14 +1355,20 @@ ProcessSingleSession() { # purpose : process data of a single observation sessio
     local AR="$7"
 
     local interval=$(get_ctrl "$ctrl_file" "Interval")
-    local site=$(grep "^ .... [KSF]" "$ctrl_file" | cut -c 2-5)
-    local mode=$(grep "^ .... [KSF]" "$ctrl_file" | cut -c 7-7)
+    local twnd=$(get_ctrl "$ctrl_file" "Time window")
+    local site=$(grep "^ .... [A-Z]" "$ctrl_file" | cut -c 2-5)
+    local mode=$(grep "^ .... [A-Z]" "$ctrl_file" | cut -c 7-7)
 
     local rinex_dir=$(dirname  "$rnxo_path")
     local rnxo_name=$(basename "$rnxo_path")
 
-    local doy_s=$(date -d "$ymd_s" +"%j")
-    local doy_e=$(date -d "$ymd_e" +"%j")
+    if [ "$OS" == "Darwin" ]; then
+        local doy_s=$(date -j -f "%Y-%m-%d" "$date_s" +"%j")
+        local doy_e=$(date -j -f "%Y-%m-%d" "$date_e" +"%j")
+    else
+        local doy_s=$(date -d "$ymd_s" +"%j")
+        local doy_e=$(date -d "$ymd_e" +"%j")
+    fi
     local ymd_s=($(echo "$ymd_s" | tr '-' ' '))
     local ymd_e=($(echo "$ymd_e" | tr '-' ' '))
     local mon_s=${ymd_s[1]}
@@ -965,7 +1390,7 @@ ProcessSingleSession() { # purpose : process data of a single observation sessio
     fi
 
     # Prepare tables
-    local table_dir=$(get_ctrl "$ctrl_file" "Table directory" | sed "s/^[ \t]*//; s/[ \t]*$//; s#^~#$HOME#")
+    local table_dir=$(get_ctrl "$ctrl_file" "Table directory" | sed "s/^[ ]*//; s/[ ]*$//; s#^~#$HOME#")
     PrepareTables "$mjd_s" "$mjd_e" "$table_dir" || return 1
     if [ $? -ne 0 ]; then
         echo -e "$MSGERR PrepareTables failed"
@@ -975,11 +1400,75 @@ ProcessSingleSession() { # purpose : process data of a single observation sessio
     # RINEX-OBS check
     local rinexobs="$rinex_dir/$rnxo_name"
     [ ! -f "$rinexobs" ] && echo -e "$MSGWAR $rinexobs doesn't exist" && return 1
+
+    local obs_cand sys_num sys num
+    local freq_cmb=($(get_ctrl "$ctrl_file" "Frequency combination"))
+    for sys_num in ${freq_cmb[@]}; do
+        sys=${sys_num:0:1}
+        grep -q "^ $sys[0-9][0-9] " "$ctrl_file" || continue
+        obs_cand+=("${sys}XX")
+        num=${sys_num:1:1}
+        obs_cand+=("${sys}C${num}")
+        obs_cand+=("${sys}L${num}")
+        num=${sys_num:2:1}
+        obs_cand+=("${sys}C${num}")
+        obs_cand+=("${sys}L${num}")
+    done
+
     local rinexver=$(head -1 "$rinexobs" | cut -c 6-6)
-    if [ "$rinexver" != "2" -a "$rinexver" != "3" ]; then
-        echo -e "$MSGERR unsupported RINEX version (not 2 or 3): $rinexobs"
+    case "$rinexver" in
+    "2" )
+        local obstypes=$(grep "# / TYPES OF OBSERV" "$rinexobs")
+        for sys_num in ${obs_cand[@]}; do
+            sys="${sys_num:0:1}"
+            sed "1,/END OF HEADER/d" "$rinexobs" | grep -q "$sys[0-9][0-9]" || continue
+            obs_cand=("${obs_cand[@]/"${sys}XX"}")
+            num="${sys_num:1:2}"
+            echo "$obstypes" | grep -q "$num" && obs_cand=("${obs_cand[@]/$sys_num}")
+            case "$sys_num" in
+            "GC1" ) num="P1" ;;
+            "GC2" ) num="P2" ;;
+            "RC1" ) num="P1" ;;
+            "RC2" ) num="P2" ;;
+              *   ) continue ;;
+            esac
+            echo "$obstypes" | grep -q "$num" && obs_cand=("${obs_cand[@]/$sys_num}")
+        done
+        ;;
+    "3" | "4" )
+        local obstypes=$(grep "SYS / # / OBS TYPES" "$rinexobs")
+        while IFS= read -r line; do
+            if [[ " " != $(echo "$line" | cut -c 1) ]]; then
+                sys=$(echo "$line" | cut -c 1) && obs_cand=("${obs_cand[@]/"${sys}XX"}")
+            fi
+            grep -Eq "^ $sys[0-9][0-9] " "$ctrl_file" || continue
+            for sys_num in ${obs_cand[@]}; do
+                [ "${sys_num:0:1}" == "$sys" ]        || continue
+                obs="${sys_num:1}"
+                echo "${freq_cmb[@]}" | grep -Eq "C17" && [ "$sys" == "C" ] && obs="$obs[DPXZ]"
+                echo "$line" | grep -Eq "$obs" && obs_cand=("${obs_cand[@]/$sys_num}")
+            done
+        done <<< "$obstypes"
+        ;;
+     *  )
+        echo -e "$MSGERR unsupported RINEX version (none of 2, 3, 4): $rinexobs"
         return 1
-    fi
+        ;;
+    esac
+
+    local avail_sys=("G" "R" "E" "C" "J")
+    for sys in ${avail_sys[@]}; do
+        grep -Eq "^ $sys[0-9][0-9] " "$ctrl_file" || continue
+        if echo "${obs_cand[@]}" | grep -q "${sys}XX"; then
+            echo -e "$MSGWAR no observation for GNSS ($sys)"
+            continue
+        fi
+        sys_num=($(echo "${obs_cand[@]}" | grep -o "$sys\w\w" | cut -c 2-3))
+        if [ ${#sys_num[@]} -ne 0 ]; then
+            echo -e "$MSGWAR no observation for GNSS ($sys): ${sys_num[@]}"
+            continue
+        fi
+    done
 
     # Prepare RINEX-NAV
     PrepareRinexNav "$mjd_s" "$mjd_e" "$rinex_dir" "$ctrl_file"
@@ -992,14 +1481,14 @@ ProcessSingleSession() { # purpose : process data of a single observation sessio
     local rinexnav="$rinex_dir/brdm${doy_s}0.${ymd_s:2:2}p"
     [ ! -f "$rinexnav" ] && echo -e "$MSGWAR $rinexnav doesn't exist" && return 1
     local rinexver=$(head -1 "$rinexnav" | cut -c 6-6)
-    if [ "$rinexver" != "2" -a "$rinexver" != "3" ]; then
-        echo -e "$MSGERR unsupported RINEX version (not 2 or 3): $rinexnav"
+    if [ "$rinexver" -lt "2" -o "$rinexver" -gt 4 ]; then
+        echo -e "$MSGERR unsupported RINEX version (none of 2, 3, 4): $rinexnav"
         return 1
     fi
 
     # Prepare products
-    local product_dir=$(get_ctrl "$ctrl_file" "Product directory" | sed "s/^[ \t]*//; s/[ \t]*$//; s#^~#$HOME#")
-    PrepareProducts "$mjd_s" "$mjd_e" "$product_dir" "$ctrl_file" "$AR"
+    local product_dir=$(get_ctrl "$ctrl_file" "Product directory" | sed "s/^[ ]*//; s/[ ]*$//; s#^~#$HOME#")
+    PrepareProducts "$mjd_s" "$mjd_e" "$product_dir" "$ctrl_file" "$rinexobs" "$AR"
     if [ $? -ne 0 ]; then
         echo -e "$MSGERR PrepareProducts failed"
         return 1
@@ -1014,6 +1503,13 @@ ProcessSingleSession() { # purpose : process data of a single observation sessio
         echo -e "${RED}($time)${NC} ${CYAN}$cmd${NC} execution failed"
         return 1
     fi
+
+    # Truncate (Reset) ambiguities at midnight (default as NO)
+    local tct_opt=$(get_ctrl "$ctrl_file" "Truncate at midnight" | tr 'a-z' 'A-Z')
+    if [[ "$tct_opt" == "DEFAULT" ]]; then
+        head -1 "$sp3" | grep -q "289   u+U IGS.. FIT  WHU" && tct_opt="NO" || tct_opt="YES"
+    fi
+    sedi "/^Truncate at midnight/s/ = .*/ = $tct_opt/" "$ctrl_file"
 
     # Process single site
     ProcessSingleSite "$rinexobs" "$rinexnav" "$ctrl_file" "$mjd_s" "$hms_s" "$mjd_e" "$hms_e" "$site" "$AR"
@@ -1040,37 +1536,66 @@ ProcessSingleSite() { # purpose : process data of single site
     local ydoy_s=($(mjd2ydoy $mjd_s))
     local ydoy_e=($(mjd2ydoy $mjd_e))
     local ymd_s=($(ydoy2ymd ${ydoy_s[*]}))
-    local ymd_e=($(ydoy2ymd ${ydoy_s[*]}))
+    local ymd_e=($(ydoy2ymd ${ydoy_e[*]}))
 
     local year=${ydoy_s[0]}
     local doy=${ydoy_s[1]}
     local ymd=(${ymd_s[@]})
 
-    local positioning_mode=$(grep "^ $site [KSF]" "$config" | awk '{print $2}') # static/kinematic/fixed
-    local cutoff_elevation=$(grep "^ $site [KSF]" "$config" | awk '{print $5}') # int, degree
+    local freq_cmb=$(get_ctrl "$ctrl_file" "Frequency combination")
+    local positioning_mode=$(grep "^ $site [A-Z]" "$config" | awk '{print $2}') # S/P/K/F/L
+    local cutoff_elevation=$(grep "^ $site [A-Z]" "$config" | awk '{print $6}') # int, degree
+    local mul_opt=$(get_ctrl "$ctrl_file" "Multipath")
 
     echo -e "$MSGSTA ProcessSingleSite ${site} from ${ydoy_s[@]} to ${ydoy_e[@]} ..."
 
     # Compute a priori positions
     echo -e "$MSGSTA Prepare initial position ${site} ..."
     local interval=$(get_ctrl "$config" "Interval")
-    ComputeInitialPos "$rinexobs" "$rinexnav" "$mjd_s" "$hms_s" "$mjd_e" "$hms_e" "$site" "$interval" "$mode"
-    awk -v sit=$site '/^Position/{printf(" %s%16.4f%16.4f%16.4f\n",sit,$3,$4,$5)}' tmp_ComputeInitialPos > sit.xyz
-    local session_time=($(awk '/^Duration/{print $3,$4,$5,$6,$7,$8,$9}' tmp_ComputeInitialPos))
-    rm -f tmp_ComputeInitialPos
-    if [ ${mode} == "F" ]; then
-        local initial_pos=($(snx2sit $site $mjd_s))
-        if [ ${#initial_pos[@]} -ne 6 ]; then
-            echo -e "$MSGERR ProcessSingleDay: no position or sigma: $site"
-            return 1
-        fi
-        printf " %s%16.4f%16.4f%16.4f%10.6f%10.6f%10.6f\n" ${site} ${initial_pos[*]} > sit.xyz
+    local twnd=$(get_ctrl "$config" "Time window") 
+    ComputeInitialPos "$rinexobs" "$rinexnav" "$mjd_s" "$hms_s" "$mjd_e" "$hms_e" "$site" "$interval" "$positioning_mode" "$twnd"
+    grep -q "Duration" tmp_ComputeInitialPos || return 1
+    if grep -q " NaN " tmp_ComputeInitialPos; then
+        echo -e "$MSGERR invalid initial position or sigma: $site"
+        return 1
     fi
+    local session_time=($(awk '/^Duration/{print $3,$4,$5,$6,$7,$8,$9}' tmp_ComputeInitialPos))
+    if [ "$positioning_mode" == "F" ]; then
+        if [ -e sit.xyz ] && grep -q "$site" sit.xyz; then
+            local initial_pos=($(awk '/'${site}'/{print($2,$3,$4,$5,$6,$7)}' sit.xyz))
+            printf " %s%16.4f%16.4f%16.4f%10.6f%10.6f%10.6f\n" ${site} ${initial_pos[*]} > sit.xyz
+        else
+            local initial_pos=($(snx2sit $site $mjd_s))
+            if [ ${#initial_pos[@]} -ne 6 ]; then
+                echo -e "$MSGERR ProcessSingleDay: no position or sigma in station coordinate product: $site snx_${year}${doy}"
+                return 1
+            fi
+            printf " %s%16.4f%16.4f%16.4f%10.6f%10.6f%10.6f\n" ${site} ${initial_pos[*]} > sit.xyz
+        fi
+    else
+        awk -v sit=$site '/^Position/{printf(" %s%16.4f%16.4f%16.4f\n",sit,$3,$4,$5)}' tmp_ComputeInitialPos > sit.xyz
+        if [ "$positioning_mode" == "L" ]; then
+            local product_dir=$(get_ctrl "$ctrl_file" "Product directory" | sed "s/^[ ]*//; s/[ ]*$//; s#^~#$HOME#")
+            local kin_pos="kin_${ydoy_s[0]}${ydoy_s[1]}_${site}"
+            local pso_pos="pso_${ydoy_s[0]}${ydoy_s[1]}_${site}"
+            if [ -e "$product_dir/leo/$pso_pos" ]; then
+                mv "${kin_pos}" "${kin_pos}_spp"
+                pso2kin.py "$product_dir/leo" "$site" "$mjd_s" "$mjd_e"
+                if [ $? -ne 0 -o ! -e "$kin_pos" ]; then
+                    echo -e "$MSGWAR ProcessSingleDay: failed to convert PSO to initial coordinates, use results from SPP instead"
+                    mv -f "${kin_pos}_spp" "${kin_pos}"
+                else
+                    rm -f "${kin_pos}_spp"
+                fi
+            fi
+        fi
+    fi
+    rm -f tmp_ComputeInitialPos
     echo -e "$MSGSTA Prepare initial position ${site} done"
 
     # Check priori positions
     local xyz=($(awk -v sit=$site '{if($1==sit){print $2,$3,$4}}' sit.xyz))
-    if [ -n "$xyz" ]; then
+    if [ -n "$xyz" -a "$positioning_mode" != "L" ]; then
         local blh=($(xyz2blh "${xyz[@]}"))
         if [[ $(echo "${blh[2]} <= -4000" | bc) -eq 1 ]] || \
            [[ $(echo "${blh[2]} >= 20000" | bc) -eq 1 ]]; then
@@ -1080,21 +1605,47 @@ ProcessSingleSite() { # purpose : process data of single site
         fi
     fi
 
+    # Compute oceanload according priori position
+    if [ "$mode" != "L" ]; then
+        echo -e "$MSGSTA Compute oceanload ${site} ..."
+        local xyz=($(awk -v sit=$site '{if($1==sit){print $2,$3,$4}}' sit.xyz))
+        local blh=($(xyz2blh "${xyz[@]}"))
+        local ts="${ymd_s[0]}/${ymd_s[1]}/${ymd_s[2]} $hms_s"
+        local te="${ymd_e[0]}/${ymd_e[1]}/${ymd_e[2]} $hms_e"
+        cmd="otl -b ${blh[0]} -l ${blh[1]} -h ${blh[2]} -s $ts -e $te -i $interval -o otl_${ydoy_s[0]}${ydoy_s[1]}_${site}"
+        ExecuteWithoutOutput "$cmd" || return 1
+        echo -e "$MSGSTA Compute oceanload ${site} done"
+    fi
+
     # Fill in session time
     if [ ${#session_time[@]} -ne 7 ]; then
         echo -e "$MSGERR ProcessSingleSite: no session time"
         return 1
     else
         session_time="${session_time[@]}"
-        sed -i "/^Session time/s/ = .*/ = $session_time/" "$ctrl_file"
+        sedi "/^Session time/s/ = .*/ = $session_time/" "$ctrl_file"
     fi
 
     # Editing mode
     local editing_mode=$(get_ctrl "$config" "Strict editing")
     if [[ "$editing_mode" != "YES" ]] && [[ "$editing_mode" != "NO" ]]; then
-        echo -e "$MSGERR ProcessSingleSite: unknown editing mode: $editing"
+        echo -e "$MSGERR ProcessSingleSite: illegal editing mode: $editing"
         return 1
     fi
+   
+    # Tighter threshold for kinematic positioning mode (loose editing mode)
+    if [ "$positioning_mode" == "P" -o "$positioning_mode" == "K" ]; then
+        local tth_opt="no"
+        local lcc_opt="no"
+        local tkshort=120
+        [[ "$editing_mode" == "NO" ]] && tth_opt="yes"
+        [[ "$editing_mode" == "NO" ]] && lcc_opt="lm"
+        [[ "$editing_mode" == "NO" ]] && tkshort=0
+    fi
+
+    # Truncate (Reset) ambiguities at midnight
+    local tct_opt=$(get_ctrl "$config" "Truncate at midnight" | cut -c 1 | tr 'A-Z' 'a-z')
+    local sinexosb="fcb_${year}${doy}"
 
     # Data preprocess
     echo -e "$MSGSTA Data pre-processing ..."
@@ -1103,45 +1654,66 @@ ProcessSingleSite() { # purpose : process data of single site
     local rhd_file="log_${year}${doy}_${site}"
     xyz=($(awk -v sit=$site '{if($1==sit){print $2,$3,$4}}' sit.xyz))
     local cmd=""
-    if [ "$positioning_mode" == S -o "$positioning_mode" == F ]; then
+    if [ "$positioning_mode" == "S" -o "$positioning_mode" == "F" ]; then
         cmd="tedit \"${rinexobs}\" -time ${ymd[*]} ${hms[*]} -len ${session} -int ${interval} \
              -xyz ${xyz[*]} -short 1200 -lc_check only -rhd ${rhd_file} -pc_check 300 \
-             -elev ${cutoff_elevation} -rnxn \"${rinexnav}\""
-        local mjd=$(ymd2mjd ${ymd[*]})
+             -elev ${cutoff_elevation} -rnxn \"${rinexnav}\" -osb \"${sinexosb}\" \
+             -freq ${freq_cmb} -trunc_dbd ${tct_opt} -tighter_thre no -twnd ${twnd}"
         if [ $mjd_s -le 51666 ]; then
             cmd="tedit \"${rinexobs}\" -time ${ymd[*]} ${hms[*]} -len ${session} -int ${interval} \
                  -xyz ${xyz[*]} -short 1200 -lc_check no -rhd ${rhd_file} -pc_check 0 \
-                 -elev ${cutoff_elevation} -rnxn \"${rinexnav}\""
+                 -elev ${cutoff_elevation} -rnxn \"${rinexnav}\" -osb \"${sinexosb}\" \
+                 -freq ${freq_cmb} -trunc_dbd ${tct_opt} -tighter_thre no -twnd ${twnd}"
         fi
-    elif [ "$positioning_mode" == K ]; then
+    elif [ "$positioning_mode" == "P" -o "$positioning_mode" == "K" ]; then
         cmd="tedit \"${rinexobs}\" -time ${ymd[*]} ${hms[*]} -len ${session} -int ${interval} \
-             -xyz kin_${year}${doy}_${site} -short 120 -lc_check no \
-             -elev ${cutoff_elevation} -rhd ${rhd_file} -rnxn \"${rinexnav}\""
+             -xyz kin_${year}${doy}_${site} -short ${tkshort} -lc_check ${lcc_opt} \
+             -elev ${cutoff_elevation} -rhd ${rhd_file} -rnxn \"${rinexnav}\" \
+             -osb \"${sinexosb}\" -freq ${freq_cmb} -trunc_dbd ${tct_opt} -tighter_thre ${tth_opt} -twnd ${twnd}"
         if [ $mjd_s -le 51666 ]; then
             cmd="tedit \"${rinexobs}\" -time ${ymd[*]} ${hms[*]} -len ${session} -int ${interval} \
-                 -xyz kin_${year}${doy}_${site} -short 120 -lc_check no \
-                 -pc_check 0 -elev ${cutoff_elevation} -rhd ${rhd_file} -rnxn \"${rinexnav}\""
+                 -xyz kin_${year}${doy}_${site} -short ${tkshort} -lc_check no \
+                 -pc_check 0 -elev ${cutoff_elevation} -rhd ${rhd_file} \
+                 -rnxn \"${rinexnav}\" -osb \"${sinexosb}\" -freq ${freq_cmb} \
+                 -trunc_dbd ${tct_opt} -tighter_thre ${tth_opt} -twnd ${twnd}"
+        fi
+    elif [ "$positioning_mode" == "L" ]; then
+        cmd="tedit \"${rinexobs}\" -time ${ymd[*]} ${hms[*]} -len ${session} -int ${interval} \
+            -xyz kin_${year}${doy}_${site} -short 120 -lc_check lm \
+            -elev ${cutoff_elevation} -rhd ${rhd_file} -rnxn \"${rinexnav}\" \
+            -osb \"${sinexosb}\" -freq ${freq_cmb} -trunc_dbd ${tct_opt} -tighter_thre no -twnd ${twnd}"
+        if [ $mjd_s -le 51666 ]; then
+           cmd="tedit \"${rinexobs}\" -time ${ymd[*]} ${hms[*]} -len ${session} -int ${interval} \
+                -xyz kin_${year}${doy}_${site} -short 120 -lc_check lm \
+                -pc_check 0 -elev ${cutoff_elevation} -rhd ${rhd_file} \
+                -rnxn \"${rinexnav}\" -osb \"${sinexosb}\" -freq ${freq_cmb} \
+                -trunc_dbd ${tct_opt} -tighter_thre no -twnd ${twnd}"
         fi
     else
-        echo -e "$MSGERR ProcessSingleSite: unknown positioning mode: $site $positioning_mode"
+        echo -e "$MSGERR ProcessSingleSite: illegal positioning mode: $positioning_mode"
         return 1
     fi
     cmd=$(tr -s " " <<< "$cmd")
     if [ $(echo "$session > 432000" | bc) -eq 1 ]; then
-       Execute "$cmd" || return 1
+        Execute "$cmd" || return 1
     else
-       ExecuteWithoutOutput "$cmd" || return 1
+        ExecuteWithoutOutput "$cmd" || return 1
     fi
     echo -e "$MSGSTA Data pre-processing done"
 
     # Data clean (iteration)
     echo -e "$MSGSTA Data cleaning ..."
-    if [ "$editing_mode" == YES ]; then
+    if [ "$editing_mode" == "YES" ]; then
         local short=$(echo $interval | awk '{printf("%.0f\n", 600/$1)}')
         local jumps=(400 200 100 50)
         local jump_end=50
+        if [ "$positioning_mode" == "L" ]; then
+            short=$(echo $interval | awk '{printf("%.0f\n", 300/$1)}')
+            jumps=(400 200 100 80 60 40)
+            jump_end=40
+        fi
     else
-        local short=$(echo $interval | awk '{printf("%.0f\n", 120/$1)}')
+        local short=0
         local jumps=(400 200 100)
         local jump_end=100
     fi
@@ -1153,6 +1725,7 @@ ProcessSingleSite() { # purpose : process data of single site
           ExecuteWithoutOutput "$cmd" || return 1
         fi
         cmd="redig res_${year}${doy} -jmp $jump -sht $short"
+        [ "$positioning_mode" == "L" ] && cmd="$cmd -pce"
         local time=`date +'%Y-%m-%d %H:%M:%S'`
         $cmd > tempout 2>&1
         if [ $? -eq 0 ]; then
@@ -1178,6 +1751,7 @@ ProcessSingleSite() { # purpose : process data of single site
         cmd="lsq ${config} \"${rinexobs}\""
         ExecuteWithoutOutput "$cmd" || return 1
         cmd="redig res_${year}${doy} -jmp $jump_end -sht $short"
+        [ "$positioning_mode" == "L" ] && cmd="$cmd -pce"
         local time=`date +'%Y-%m-%d %H:%M:%S'`
         $cmd > tempout 2>&1
         if [ $? -eq 0 ]; then
@@ -1199,17 +1773,48 @@ ProcessSingleSite() { # purpose : process data of single site
     rm -f tempout
     echo -e "$MSGSTA Data cleaning done"
 
-    # Ambiguity fixing
-    if [ "$AR" == "Y" ] || [ "$AR" == "A" -a -f fcb_${year}${doy} ]; then
-        cmd="arsig ${config}"
-        Execute "$cmd" || return 1
-        cmd="lsq ${config} \"${rinexobs}\""
-        Execute "$cmd" || return 1
+    local vbs_opt=$(get_ctrl "$ctrl_file" "Verbose output" | tr 'a-z' 'A-Z')
+
+    # Determine whether it is a mobile platform 
+    if [ "$positioning_mode" == "K" ] || [ "$positioning_mode" == "P" ]; then
+        local max_distance=$(GetMaxDistance "kin_${ydoy_s[0]}${ydoy_s[1]}_${site}")
+        if [[ "$mul_opt" == "YES" && $(echo "$max_distance > 10" | bc) -eq 1 ]]; then
+            echo -e "$MSGWAR mhm cannot be applied to mobile platforms"
+        fi
     fi
+
+    # Multipath compensation
+    if [[ "$mul_opt" == "YES" ]]; then
+        ApplyMhmModel "$ctrl_file" "$rinexobs" "$mjd_s"  
+    fi
+
+    # Ambiguity fixing
+    if [ "$AR" != "N" ] && [ -f "${sinexosb}" ]; then
+        if [ $(grep "# OF AMB RESOLVABLE SAT" amb_${year}${doy} | awk '{print($1)}') -ne 0 ]; then
+            cmd="arsig ${config}"
+            Execute "$cmd" || return 1
+            cmd="lsq ${config} \"${rinexobs}\""
+            if [ "$vbs_opt" == "YES" ]; then
+                Execute "$cmd" || return 1
+            else
+                ExecuteWithoutOutput "$cmd" || return 1
+            fi
+        else
+            if [ "$AR" == "Y" ]; then
+                echo -e "$MSGERR no resolvable ambiguities"
+                echo -e "$MSGINF please check if all required observations and OSBs exist"
+                return 1
+            elif [ "$AR" == "A" ]; then
+                echo -e "$MSGWAR no resolvable ambiguities"
+                echo -e "$MSGINF please check if all required observations and OSBs exist"
+            fi
+        fi
+    fi
+
     echo -e "$MSGSTA Final processing done"
 
     # Rename result files
-    local fn typ types=(rck ztd htg amb res stt cst) fn
+    local fn typ types=(rck ztd htg amb res stt cst)
     for typ in ${types[*]}; do
         fn=${typ}_${year}${doy}
         [ -f ${fn} ] && mv -f ${fn} ${fn}_${site}
@@ -1219,7 +1824,7 @@ ProcessSingleSite() { # purpose : process data of single site
 }
 
 ComputeInitialPos() { # purpose : compute intial postion with spp
-                      # usage   : ComputeInitialPos rinexobs rinexnav mjd_s hms_start mjd_e hms_end site interval mode(S/K/F)
+                      # usage   : ComputeInitialPos rinexobs rinexnav mjd_s hms_start mjd_e hms_end site interval mode
     local rinexobs="$1"
     local rinexnav="$2"
     local mjd_s="$3"
@@ -1229,6 +1834,7 @@ ComputeInitialPos() { # purpose : compute intial postion with spp
     local site="$7"
     local interval="$8"
     local mode="$9"
+    local twnd="${10}"
 
     local ydoy_s=($(mjd2ydoy ${mjd_s}))
     local ymd_s=($(ydoy2ymd ${ydoy_s[*]}))
@@ -1238,14 +1844,18 @@ ComputeInitialPos() { # purpose : compute intial postion with spp
     local ts="${ymd_s[0]}/${ymd_s[1]}/${ymd_s[2]} $hms_s"
     local te="${ymd_e[0]}/${ymd_e[1]}/${ymd_e[2]} $hms_e"
 
+
     local cmd=""
-    if [ "$mode" == "K" ]; then
-        cmd="spp -trop saas -ts $ts -te $te -ti $interval -o kin_${ydoy_s[0]}${ydoy_s[1]}_${site} \"$rinexobs\" \"$rinexnav\""
+    if [ "$mode" == "K" -o "$mode" == "P" ]; then
+        cmd="spp -elev 10 -trop saas -ts $ts -te $te -ti $interval -twnd $twnd -o kin_${ydoy_s[0]}${ydoy_s[1]}_${site} \"$rinexobs\" \"$rinexnav\""
+    elif [ "$mode" == "L" ]; then
+        cmd="spp -elev  0 -trop non  -ts $ts -te $te -ti $interval -twnd $twnd -o kin_${ydoy_s[0]}${ydoy_s[1]}_${site} \"$rinexobs\" \"$rinexnav\""
     else
-        cmd="spp -trop saas -ts $ts -te $te -ti $interval \"$rinexobs\" \"$rinexnav\""
+        cmd="spp -elev 10 -trop saas -ts $ts -te $te -ti $interval -twnd $twnd -o kin_${ydoy_s[0]}${ydoy_s[1]}_${site} \"$rinexobs\" \"$rinexnav\""
     fi
 
     Execute "$cmd" tmp_ComputeInitialPos || return 1
+    [ "$mode" == "S" -o "$mode" == "F" ] && rm -f kin_${ydoy_s[0]}${ydoy_s[1]}_${site}
 }
 
 PrepareTables() { # purpose: prepare PRIDE-PPPAR needed tables in working directory
@@ -1258,15 +1868,15 @@ PrepareTables() { # purpose: prepare PRIDE-PPPAR needed tables in working direct
 
     if ! ls $table_dir &>/dev/null; then
         echo -e "$MSGERR PrepareTables: table directory doesn't exist: $table_dir"
-        [ "$table_dir" == "Default" ] && echo -e "$MSGINF please define your table directory in configuration file"
+        [ "$table_dir" == "Default" ] && echo -e "$MSGINF please specify the table directory in the configuration file"
         return 1
     fi
 
-    local tables=(file_name oceanload orography_ell orography_ell_1x1 gpt3_1.grd)
+    local tables=(file_name FES2004S1.dat Love_load_cm.dat orography_ell orography_ell_1x1 gpt3_1.grd oceanload)
     for table in ${tables[*]}; do
         if [ ! -f "$table_dir/$table" ]; then
-             echo -e "$MSGERR PrepareTables: no such file: $table_dir/$table"
-             return 1
+            echo -e "$MSGERR PrepareTables: no such file: $table_dir/$table"
+            return 1
         fi
         ln -sf "$table_dir/$table" ./
     done
@@ -1289,7 +1899,7 @@ PrepareTables() { # purpose: prepare PRIDE-PPPAR needed tables in working direct
             cp -f "$table_dir/$leapsec" .
         else
             if ! grep -q "\-leap sec" "$leapsec"; then
-                echo -e "$MSGWAR PrepareTables: failed to download $leapsec, use default instead"
+                echo -e "$MSGWAR PrepareTables: failed to download $leapsec, use $table_dir/$leapsec instead"
                 cp -f "$table_dir/$leapsec" .
             fi
             local diff=$(diff "$leapsec" "$table_dir/$leapsec")
@@ -1297,8 +1907,8 @@ PrepareTables() { # purpose: prepare PRIDE-PPPAR needed tables in working direct
         fi
     fi
     if ! grep -q "\-leap sec" "$leapsec"; then
-        echo -e "$MSGERR PrepareTables: no available $leapsec"
-        echo -e "$MSGINF please download this file from $leapsrc_url"
+        echo -e "$MSGERR PrepareTables: $leapsec invalid or not found"
+        echo -e "$MSGINF please download from $leapsec_url to $table_dir for processing"
         return 1
     fi
 
@@ -1322,7 +1932,7 @@ PrepareTables() { # purpose: prepare PRIDE-PPPAR needed tables in working direct
             cp -f "$table_dir/$satpara" .
         else
             if ! grep -q "\-prn_indexed" "$satpara"; then
-                echo -e "$MSGWAR PrepareTables: failed to download $satpara, use default instead"
+                echo -e "$MSGWAR PrepareTables: failed to download $satpara, use $table_dir/$satpara instead"
                 cp -f "$table_dir/$satpara" .
             fi
             local diff=$(diff "$satpara" "$table_dir/$satpara")
@@ -1330,15 +1940,15 @@ PrepareTables() { # purpose: prepare PRIDE-PPPAR needed tables in working direct
         fi
     fi
     if ! grep -q "\-prn_indexed" "$satpara"; then
-        echo -e "$MSGERR PrepareTables: no available $satpara"
-        echo -e "$MSGINF please download this file from $satpara_url"
+        echo -e "$MSGERR PrepareTables: $satpara invalid or not found"
+        echo -e "$MSGINF please download from $satpara_url to $table_dir for processing"
         return 1
     else
         local tmpymd=($(sed -n "1p;q" "$satpara" | awk '{print(substr($0,56,4),substr($0,61,2),substr($0,64,2))}'))
         local tmpmjd=$(ymd2mjd ${tmpymd[@]})
         if [ $? -ne 0 -o "$tmpmjd" -lt "$mjd_e" ]; then
             echo -e "$MSGWAR PrepareTables: outdated $satpara"
-            echo -e "$MSGINF please update this file from $satpara_url"
+            echo -e "$MSGINF please update from $satpara_url to $table_dir for processing"
         fi
     fi
 
@@ -1368,7 +1978,7 @@ PrepareRinexNav() { # purpose : prepare RINEX multi-systems broadcast ephemeride
             if [ $? -eq 0 ]; then
                 gunzip -f ${navgps}.gz
             else
-                echo -e "$MSGWAR download hourly rinexnav failed: $navgps"
+                echo -e "$MSGWAR failed to download hourly GPS navigation file: $navgps"
             fi
             local navglo="hour${doy}0.${year:2:2}g" && rm -f "$navglo"
             local urlnav="ftp://igs.gnsswhu.cn/pub/gps/data/hourly/${year}/${doy}/${navglo}.gz"
@@ -1376,20 +1986,21 @@ PrepareRinexNav() { # purpose : prepare RINEX multi-systems broadcast ephemeride
             if [ $? -eq 0 ]; then
                 gunzip -f ${navglo}.gz
             else
-                echo -e "$MSGWAR download hourly rinexnav failed: $navglo"
+                echo -e "$MSGWAR failed to download hourly GLONASS navigation file: $navglo"
             fi
             if [ -f "$navgps" -a -f "$navglo" ]; then
                 echo -e "$MSGSTA Merging $rinexnav ..."
                 merge2brdm.py "$navgps" "$navglo" && mv -f "$rinexnav" "$rinex_dir"
                 if [ $? -ne 0 -o ! -f "$rinex_dir/$rinexnav" ]; then
-                    echo -e "$MSGERR merging hourly rinexnav failed: $navgps $navglo -> $rinexnav"
+                    echo -e "$MSGERR failed to merge hourly RINEX navigation files: $navgps $navglo -> $rinexnav"
                     return 1
                 fi
             else
                 [ -f "$navglo" ] && mv -f "$navglo" "$rinex_dir/$rinexnav"
                 [ -f "$navgps" ] && mv -f "$navgps" "$rinex_dir/$rinexnav"
                 if [ ! -f "$rinex_dir/$rinexnav" ]; then
-                    echo -e "$MSGERR download hourly rinexnav failed: $rinex_dir/$rinexnav"
+                    echo -e "$MSGERR failed to download hourly RINEX navigation file: $rinex_dir/$rinexnav"
+                    echo -e "$MSGINF please download from $urlnav to $rinex_dir for processing"
                     return 1
                 fi
             fi
@@ -1420,7 +2031,7 @@ PrepareRinexNav() { # purpose : prepare RINEX multi-systems broadcast ephemeride
                     if [ $? -eq 0 ]; then
                         gunzip -f ${tmpnav}.gz && mv -f "$tmpnav" "$rinex_dir/$rinexnav"
                     else
-                        echo -e "$MSGWAR download rinexnav failed: $tmpnav"
+                        echo -e "$MSGWAR failed to download RINEX navigation file: $tmpnav"
                     fi
                 fi
             fi
@@ -1435,7 +2046,7 @@ PrepareRinexNav() { # purpose : prepare RINEX multi-systems broadcast ephemeride
                 if [ $? -ne 0 ]; then
                     WgetDownload "$urlnav" && gunzip -f "${navgps}.Z"
                     if [ $? -ne 0 ]; then
-                        echo -e "$MSGWAR download rinexnav failed: $navgps"
+                        echo -e "$MSGWAR failed to download GPS navigation file: $navgps"
                     fi
                 fi
             fi
@@ -1446,21 +2057,22 @@ PrepareRinexNav() { # purpose : prepare RINEX multi-systems broadcast ephemeride
                 if [ $? -ne 0 ]; then
                     WgetDownload "$urlnav" && gunzip -f "${navglo}.Z"
                     if [ $? -ne 0 ]; then
-                        echo -e "$MSGWAR download rinexnav failed: $navglo"
+                        echo -e "$MSGWAR failed to download GLONASS navigation file: $navglo"
                     fi
                 fi
             fi
             if [ -f "$navgps" -a -f "$navglo" ]; then
                 merge2brdm.py "$navgps" "$navglo" && mv -f "$rinexnav" "$rinex_dir"
                 if [ $? -ne 0 -o ! -f "$rinex_dir/$rinexnav" ]; then
-                    echo -e "$MSGERR merging rinexnav failed: $navgps $navglo -> $rinexnav"
+                    echo -e "$MSGERR failed to merge RINEX navigation files: $navgps $navglo -> $rinexnav"
                     return 1
                 fi
             else
                 [ -f "$navglo" ] && mv -f "$navglo" "$rinex_dir/$rinexnav"
                 [ -f "$navgps" ] && mv -f "$navgps" "$rinex_dir/$rinexnav"
                 if [ ! -f "$rinex_dir/$rinexnav" ]; then
-                    echo -e "$MSGERR download rinexnav failed: $rinex_dir/$rinexnav"
+                    echo -e "$MSGERR failed to download RINEX navigation file: $rinex_dir/$rinexnav"
+                    echo -e "$MSGINF please download from $urlnav to $rinex_dir for processing"
                     return 1
                 fi
             fi
@@ -1478,19 +2090,19 @@ PrepareRinexNav() { # purpose : prepare RINEX multi-systems broadcast ephemeride
             grep -q "^ $sys[0-9][0-9] " "$config" && nsys=$[$nsys+1]
             echo -e "$MSGWAR using single-GNSS ($sys) RINEX navigation file: $rinexnav"
             ;;
-        "3" )
+        "3" | "4" )
             local avail_sys=("G" "R" "E" "C" "J")
             for sys in ${avail_sys[@]}; do
                grep -Eq "^ $sys[0-9][0-9] " "$config" || continue
                grep -Eq "^$sys[ 0-9][0-9] " "$rinex_dir/$rinexnav" && nsys=$[$nsys+1]
                if [ $? -ne 0 ]; then
-                   echo -e "$MSGWAR no $sys satellites in RINEX navigation file: $rinexnav"
+                   echo -e "$MSGWAR no navigation message for GNSS ($sys): $rinexnav"
                fi
             done
             ;;
         esac
         if [ "$nsys" -eq 0 ]; then
-            echo -e "$MSGERR all GNSS in RINEX navigation file have been disabled: $rinexnav"
+            echo -e "$MSGERR all satellites in RINEX navigation file are disabled: $rinexnav"
             exit 1
         fi
     done
@@ -1499,28 +2111,33 @@ PrepareRinexNav() { # purpose : prepare RINEX multi-systems broadcast ephemeride
 }
 
 PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working directory
-                    # usage   : PrepareProducts mjd_s mjd_e product_dir config AR(A/Y/N)
+                    # usage   : PrepareProducts mjd_s mjd_e product_dir config rinexobs AR(A/Y/N)
     local mjd_s="$1"
     local mjd_e="$2"
     local product_dir="$3"
     local config="$4"
-    local AR="$5"
+    local rinexobs="$5"
+    local AR="$6"
 
     local ydoy_s=($(mjd2ydoy $mjd_s))
     local ymd_s=($(ydoy2ymd ${ydoy_s[*]}))
     local doy_s=${ydoy_s[1]}
 
+    local mul=$(get_ctrl "$config" "Multipath")
+    local ign_priority_path="$(dirname $(which pdp3))/.ign_priority"
+
     echo -e "$MSGSTA PrepareProducts ..."
 
     if [ "$product_dir" == "Default" ]; then
-       product_dir="$(readlink -f ..)/product/"
-       sed -i "/^Product directory/s/ = .*/ = ${product_dir//\//\\/}/" "$config"
+        product_dir="$(rdlk ..)/product/"
+        sedi "/^Product directory/s/ = .*/ = ${product_dir//\//\\/}/" "$config"
     fi
 
-    product_cmn_dir="$product_dir/common"
-    product_ion_dir="$product_dir/ion"
-    product_vmf_dir="$product_dir/vmf"
-    product_ssc_dir="$product_dir/ssc"
+    local product_cmn_dir="$product_dir/common"
+    local product_ion_dir="$product_dir/ion"
+    local product_vmf_dir="$product_dir/vmf"
+    local product_ssc_dir="$product_dir/ssc"
+    local product_leo_dir="$product_dir/leo"
 
     [ "$OFFLINE" == "NO" ] && mkdir -p "$product_cmn_dir"
 
@@ -1533,7 +2150,7 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
             if [ $? -ne 0 ]; then
                 CopyOrDownloadProduct "$product_dir/$sp3"
                 if [ $? -ne 0 ]; then
-                    echo -e "$MSGERR PrepareProducts: no such file: $sp3"
+                    echo -e "$MSGERR PrepareProducts: no satellite orbit product: $sp3"
                     return 1
                 fi
             fi          
@@ -1543,7 +2160,7 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
             sp3="mersp3_${ymd_s}${doy_s}"
             MergeFiles "$(pwd)" "$custom_pro_sp3" "$sp3"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: $sp3 merge failed"
+                echo -e "$MSGERR PrepareProducts: failed to merge satellite orbit products: $custom_pro_sp3 -> $sp3"
                 return 1
             fi
             for tmp in $(echo "$custom_pro_sp3"); do
@@ -1553,67 +2170,71 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
     else
         local custom_pro_sp3=""
         for mjd in $(seq $mjd_s $mjd_e); do
-            local ydoy=($(mjd2ydoy $mjd))
-            local wkdow=($(mjd2wkdow $mjd))
-            if [ $mjd_s -ge 58849 ]; then
-                local sp3="WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_01M_ORB.SP3"
-                local sp3_cmp="${sp3}.gz"
-                local sp3_url="ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/orbit/${sp3_cmp}"
-            elif [ $mjd_s -ge 56658 ]; then
-                local sp3="COM${wkdow[0]}${wkdow[1]}.EPH"
-                local sp3_cmp="${sp3}.Z"
-                local sp3_url="ftp://ftp.aiub.unibe.ch/CODE_MGEX/CODE/${ydoy[0]}/${sp3_cmp}"
-            elif [ $mjd_s -ge 52581 ]; then
-                local sp3="COD${wkdow[0]}${wkdow[1]}.EPH"
-                local sp3_cmp="${sp3}.Z"
-                local sp3_url="ftp://ftp.aiub.unibe.ch/CODE/${ydoy[0]}/${sp3_cmp}"
-            else
-                echo -e "$MSGERR no available ephemeris product before MJD 52581" && return 1
+            if [ "$mjd_s" -lt 49718 ]; then
+                echo -e "$MSGERR no available satellite product for dates before MJD 49718"
+                return 1
             fi
-            CopyOrDownloadProduct "$product_cmn_dir/$sp3"
-            if [ $? -ne 0 ]; then
-                CopyOrDownloadProduct "$product_cmn_dir/$sp3_cmp" "$sp3_url"
-                if [ $? -ne 0 ] && [[ "$sp3" == WUM0MGXRAP* ]]; then
-                    echo -e "$MSGWAR PrepareProducts: $sp3_cmp download failed, try using RTS product"
-                    sp3="WUM0MGXRTS_${ydoy[0]}${ydoy[1]}0000_01D_01M_ORB.SP3"
-                    sp3_cmp="${sp3}.gz"
-                    sp3_url="ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/orbit/${sp3_cmp}"
-                    if [ -f "$product_cmn_dir/$sp3_cmp" ]; then
-                        size_last=$(ls -l "$product_cmn_dir/$sp3_cmp" | awk '{print($5)}')
-                        size_next=$(curl "$(dirname $sp3_url)/" | grep "$sp3" | awk '{print($5)}')
+            local ydoy=($(mjd2ydoy $mjd))
+            local wkdow=($(mjd2wkdow $mjd_s))
+            local urls=(
+                "ftp://igs.ign.fr/pub/igs/products/mgex/${wkdow[0]}/WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_05M_ORB.SP3.gz"
+                "ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/orbit/WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_05M_ORB.SP3.gz"
+                "ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/orbit/IGS2R03FIN_${ydoy[0]}${ydoy[1]}0000_01D_05M_ORB.SP3.gz"
+            )
+            for url in ${urls[@]}; do
+                if [[ "$url" =~ igs.ign.fr ]]; then
+                    [ -e "$ign_priority_path" ] && [ "${wkdow[0]}" -ge 2290 ] || continue
+                fi
+                local cmp=$(basename "$url")
+                local sp3="${cmp/\.[gZ]*/}"
+                CopyOrDownloadProduct "$product_cmn_dir/$sp3"        && break
+                CopyOrDownloadProduct "$product_cmn_dir/$cmp" "$url" && break
+            done
+            [ -f "$cmp" ] && gunzip -f "$cmp"
+            if [ ! -f "$sp3" ]; then
+                local mjd_t=$(ymd2mjd $(date +"%Y %m %d"))
+                if [ $mjd_e -gt $(($mjd_t-3)) ] && [ "$USERTS" == "YES" ]; then
+                    local url="ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/orbit/WUM0MGXRTS_${ydoy[0]}${ydoy[1]}0000_01D_05M_ORB.SP3.gz"
+                    local cmp=$(basename "$url")
+                    local sp3="${cmp/\.[gZ]*/}"
+                    echo -e "$MSGWAR PrepareProducts: failed to download RAP satellite orbit product $cmp, try downloading RTS products"
+                    if [ -f "$product_cmn_dir/$cmp" ]; then
+                        size_last=$(ls -l "$product_cmn_dir/$cmp" | awk '{print($5)}')
+                        size_next=$(curl "$(dirname $url)/" | grep "$sp3" | awk '{print($5)}')
                         if [ $? -eq 0 ]; then
-                           if [ "$size_next" -gt "$size_last" ]; then
-                               rm -f "$sp3"* "$product_cmn_dir/$sp3"*
-                           fi
+                            if [ "$size_next" -gt "$size_last" ]; then
+                                rm -f "$sp3"* "$product_cmn_dir/$sp3"*
+                            fi
                         fi
                     fi
                     CopyOrDownloadProduct "$product_cmn_dir/$sp3"
-                    if [ $? -ne 0 ]; then
-                        CopyOrDownloadProduct "$product_cmn_dir/$sp3_cmp" "$sp3_url"
-                        if [ $? -ne 0 ]; then
-                            echo -e "$MSGERR PrepareProducts: $sp3_cmp download failed"
-                            return 1
-                        fi
-                    fi
-                   custom_pro_att="None"
-                   local att="$custom_pro_att"
-                   sed -i "/Quaternions/s/Default/$att/g" "$config"
-                   custom_pro_fcb="None"
-                   local fcb="$custom_pro_fcb"
-                   sed -i "/Code\/phase bias/s/Default/$fcb/g" "$config"
+                    [ $? -ne 0 ] && CopyOrDownloadProduct "$product_cmn_dir/$cmp" "$url"
+                    ## No satellite attitude product for RTS
+                    custom_pro_att="NONE"
+                    local att="$custom_pro_att"
+                    sedi "/Quaternions/s/Default/$att/g" "$config"
+                else
+                    [ ${ydoy[0]} -ge 2020 ] && local url="${urls[1]}" || local url="${urls[${#urls[@]}-1]}"
+                    local cmp=$(basename "$url")
+                    local sp3="${cmp/\.[gZ]*/}"
                 fi
             fi
-            [ -f "$sp3_cmp" ] && gunzip -f "$sp3_cmp"
-            sed -i "/Satellite orbit/s/Default/$sp3 &/" "$config"
+            [ -f "$cmp" ] && gunzip -f "$cmp"
+            if [ ! -f "$sp3" ]; then
+                echo -e "$MSGERR PrepareProducts: failed to download satellite orbit product: $cmp"
+                echo -e "$MSGINF please download from $url to $product_cmn_dir for processing"
+                return 1
+            fi
+            sedi "/Satellite orbit/s/Default/$sp3 &/" "$config"
             custom_pro_sp3="$custom_pro_sp3 $sp3"
         done
-        sed -i "/Satellite orbit/s/Default//g" "$config"
+        sedi "/Satellite orbit/s/Default//g" "$config"
         local argnum=$(echo "$custom_pro_sp3" | wc -w)
-        if [ $argnum -gt 1 ]; then    
+        if [ $argnum -gt 1 ]; then
             sp3="mersp3_${ymd_s}${doy_s}"
             MergeFiles "$(pwd)" "$custom_pro_sp3" "$sp3"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: $sp3 merge failed"
+                echo -e "$MSGERR PrepareProducts: failed to merge satellite orbit products: $custom_pro_sp3 -> $sp3"
                 return 1
             fi
             for tmp in $(echo "$custom_pro_sp3"); do
@@ -1631,7 +2252,7 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
             if [ $? -ne 0 ]; then
                 CopyOrDownloadProduct "$product_dir/$clk"
                 if [ $? -ne 0 ]; then
-                    echo -e "$MSGERR PrepareProducts: no such file: $clk"
+                    echo -e "$MSGERR PrepareProducts: no satellite clock product: $clk"
                     return 1
                 fi
             fi          
@@ -1641,7 +2262,7 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
             clk="mersck_${ymd_s}${doy_s}"
             MergeFiles "$(pwd)" "$custom_pro_clk" "$clk"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: $clk merge failed"
+                echo -e "$MSGERR PrepareProducts: failed to merge satellite clock products: $custom_pro_clk -> $clk"
                 return 1
             fi
             for tmp in $(echo "$custom_pro_clk"); do
@@ -1651,67 +2272,73 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
     else
         local custom_pro_clk=""
         for mjd in $(seq $mjd_s $mjd_e); do
-            local ydoy=($(mjd2ydoy $mjd))
-            local wkdow=($(mjd2wkdow $mjd))
-            if [ $mjd_s -ge 58849 ]; then
-                local clk="WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_30S_CLK.CLK"
-                local clk_cmp="${clk}.gz"
-                local clk_url="ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/clock/${clk_cmp}"
-            elif [ $mjd_s -ge 56658 ]; then
-                local clk="COM${wkdow[0]}${wkdow[1]}.CLK"
-                local clk_cmp="${clk}.Z"
-                local clk_url="ftp://ftp.aiub.unibe.ch/CODE_MGEX/CODE/${ydoy[0]}/${clk_cmp}"
-            elif [ $mjd_s -ge 51601 ]; then
-                local clk="COD${wkdow[0]}${wkdow[1]}.CLK"
-                local clk_cmp="${clk}.Z"
-                local clk_url="ftp://ftp.aiub.unibe.ch/CODE/${ydoy[0]}/${clk_cmp}"
-            else
-                echo -e "$MSGERR no available clock product before MJD 51601" && return 1
+            if [ "$mjd_s" -lt 49718 ]; then
+                echo -e "$MSGERR no available satellite product for dates before MJD 49718"
+                return 1
             fi
-            CopyOrDownloadProduct "$product_cmn_dir/$clk"
-            if [ $? -ne 0 ]; then
-                CopyOrDownloadProduct "$product_cmn_dir/$clk_cmp" "$clk_url"
-                if [ $? -ne 0 ] && [[ $clk == WUM0MGXRAP* ]]; then
-                    echo -e "$MSGWAR PrepareProducts: $clk_cmp download failed, try using RTS product"
-                    clk="WUM0MGXRTS_${ydoy[0]}${ydoy[1]}0000_01D_05S_CLK.CLK"
-                    clk_cmp="${clk}.gz"
-                    clk_url="ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/clock/${clk_cmp}"
-                    if [ -f "$product_cmn_dir/$clk_cmp" ]; then
-                        size_last=$(ls -l "$product_cmn_dir/$clk_cmp" | awk '{print($5)}')
-                        size_next=$(curl "$(dirname $clk_url)/" | grep "$clk" | awk '{print($5)}')
+            local ydoy=($(mjd2ydoy $mjd))
+            local wkdow=($(mjd2wkdow $mjd_s))
+            local urls=(
+                "ftp://igs.ign.fr/pub/igs/products/mgex/${wkdow[0]}/WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_30S_CLK.CLK.gz"
+                "ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/clock/WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_30S_CLK.CLK.gz"
+                "ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/clock/IGS2R03FIN_${ydoy[0]}${ydoy[1]}0000_01D_30S_CLK.CLK.gz"
+            )
+            for url in ${urls[@]}; do
+                if [[ "$url" =~ igs.ign.fr ]]; then
+                    [ -e "$ign_priority_path" ] && [ "${wkdow[0]}" -ge 2290 ] || continue
+                fi
+                local cmp=$(basename "$url")
+                local clk="${cmp/\.[gZ]*/}"
+                CopyOrDownloadProduct "$product_cmn_dir/$clk"        && break
+                CopyOrDownloadProduct "$product_cmn_dir/$cmp" "$url" && break
+            done
+            [ -f "$cmp" ] && gunzip -f "$cmp"
+            if [ ! -f "$clk" ]; then
+                local mjd_t=$(ymd2mjd $(date +"%Y %m %d"))
+                if [ $mjd_e -gt $(($mjd_t-3)) ] && [ "$USERTS" == "YES" ]; then
+                    local url="ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/clock/WUM0MGXRTS_${ydoy[0]}${ydoy[1]}0000_01D_05S_CLK.CLK.gz"
+                    local cmp=$(basename "$url")
+                    local clk="${cmp/\.[gZ]*/}"
+                    echo -e "$MSGWAR PrepareProducts: failed to download RAP satellite clock product $cmp, try downloading RTS products"
+                    if [ -f "$product_cmn_dir/$cmp" ]; then
+                        size_last=$(ls -l "$product_cmn_dir/$cmp" | awk '{print($5)}')
+                        size_next=$(curl "$(dirname $url)/" | grep "$clk" | awk '{print($5)}')
                         if [ $? -eq 0 ]; then
-                           if [ "$size_next" -gt "$size_last" ]; then
-                               rm -f "$clk"* "$product_cmn_dir/$clk"*
-                           fi
+                            if [ "$size_next" -gt "$size_last" ]; then
+                                rm -f "$clk"* "$product_cmn_dir/$clk"*
+                            fi
                         fi
                     fi
                     CopyOrDownloadProduct "$product_cmn_dir/$clk"
-                    if [ $? -ne 0 ]; then
-                        CopyOrDownloadProduct "$product_cmn_dir/$clk_cmp" "$clk_url"
-                        if [ $? -ne 0 ]; then
-                            echo -e "$MSGERR PrepareProducts: $clk_cmp download failed"
-                            return 1
-                        fi
-                    fi
+                    [ $? -ne 0 ] && CopyOrDownloadProduct "$product_cmn_dir/$cmp" "$url"
+                else
+                    [ ${ydoy[0]} -ge 2020 ] && local url="${urls[1]}" || local url="${urls[${#urls[@]}-1]}"
+                    local cmp=$(basename "$url")
+                    local clk="${cmp/\.[gZ]*/}"
                 fi
             fi
-            [ -f "$clk_cmp" ] && gunzip -f "$clk_cmp"
-            sed -i "/Satellite clock/s/Default/$clk &/" "$config"
+            [ -f "$cmp" ] && gunzip -f "$cmp"
+            if [ ! -f "$clk" ]; then
+                echo -e "$MSGERR PrepareProducts: failed to download satellite clock product: $cmp"
+                echo -e "$MSGINF please download from $url to $product_cmn_dir for processing"
+                return 1
+            fi
+            sedi "/Satellite clock/s/Default/$clk &/" "$config"
             custom_pro_clk="$custom_pro_clk $clk"
         done
-        sed -i "/Satellite clock/s/Default//g" "$config"
+        sedi "/Satellite clock/s/Default//g" "$config"
         local argnum=$(echo "$custom_pro_clk" | wc -w)
         if [ $argnum -gt 1 ]; then    
             clk="mersck_${ymd_s}${doy_s}"
             MergeFiles "$(pwd)" "$custom_pro_clk" "$clk"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: $clk merge failed"
+                echo -e "$MSGERR PrepareProducts: failed to merge satellite clock products: $custom_pro_clk -> $clk"
                 return 1
             fi
             for tmp in $(echo "$custom_pro_clk"); do
                 rm -f "$tmp"
             done
-        fi        
+        fi
     fi
 
     # Earth rotation parameters
@@ -1723,17 +2350,17 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
             if [ $? -ne 0 ]; then
                 CopyOrDownloadProduct "$product_dir/$erp"
                 if [ $? -ne 0 ]; then
-                    echo -e "$MSGERR PrepareProducts: no such file: $erp"
+                    echo -e "$MSGERR PrepareProducts: no ERP product: $erp"
                     return 1
                 fi
-            fi          
+            fi
         done
         local argnum=$(echo "$custom_pro_erp" | wc -w)
-        if [ $argnum -gt 1 ]; then    
+        if [ $argnum -gt 1 ]; then
             erp="mererp_${ymd_s}${doy_s}"
             MergeFiles "$(pwd)" "$custom_pro_erp" "$erp"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: $erp merge failed"
+                echo -e "$MSGERR PrepareProducts: failed to merge ERP products: $custom_pro_erp -> $erp"
                 return 1
             fi
             for tmp in $(echo "$custom_pro_erp"); do
@@ -1742,71 +2369,75 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
         fi
     else
         local custom_pro_erp=""
-        for mjd in $(seq $mjd_s $mjd_e); do
-            local ydoy=($(mjd2ydoy $mjd))
-            local wkdow=($(mjd2wkdow $mjd))
-            if [ $mjd_s -ge 58849 ]; then
-                local erp="WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_01D_ERP.ERP"
-                local erp_cmp="${erp}.gz"
-                local erp_url="ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/orbit/${erp_cmp}"
-            elif [ $mjd_s -ge 56658 ]; then
-                local erp="COM${wkdow[0]}${wkdow[1]}.ERP"
-                local erp_cmp="${erp}.Z"
-                local erp_url="ftp://ftp.aiub.unibe.ch/CODE_MGEX/CODE/${ydoy[0]}/${erp_cmp}"
-            elif [ $mjd_s -ge 56187 ]; then
-                local erp="COD${wkdow[0]}${wkdow[1]}.ERP"
-                local erp_cmp="${erp}.Z"
-                local erp_url="ftp://ftp.aiub.unibe.ch/CODE/${ydoy[0]}/${erp_cmp}"
-            elif [ $mjd_s -ge 48792 ]; then
-                local erp="COD${wkdow[0]}7.ERP"
-                local erp_cmp="${erp}.Z"
-                local erp_url="ftp://ftp.aiub.unibe.ch/CODE/${ydoy[0]}/${erp_cmp}"
-            else
-                echo -e "$MSGERR no available ERP product before MJD 48792" && return 1
+        local mjd_seq=($(seq $mjd_s $mjd_e))
+        [ "$mode" == "L" ] && mjd_seq=($(seq $[$mjd_s-1] $[$mjd_e+1]))
+        for mjd in "${mjd_seq[@]}"; do
+            if [ "$mjd_s" -lt 49718 ]; then
+                echo -e "$MSGERR no available satellite product for dates before MJD 49718"
+                return 1
             fi
-            CopyOrDownloadProduct "$product_cmn_dir/$erp"
-            if [ $? -ne 0 ]; then
-                CopyOrDownloadProduct "$product_cmn_dir/$erp_cmp" "$erp_url"
-                if [ $? -ne 0 ] && [[ $erp == WUM0MGXRAP* ]]; then
-                    echo -e "$MSGWAR PrepareProducts: $erp_cmp download failed, try using RTS product"
-                    erp="WUM0MGXRTS_${ydoy[0]}${ydoy[1]}0000_01D_01D_ERP.ERP"
-                    erp_cmp="${erp}.gz"
-                    erp_url="ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/orbit/${erp_cmp}"
-                    if [ -f "$product_cmn_dir/$erp_cmp" ]; then
-                        size_last=$(ls -l "$product_cmn_dir/$erp_cmp" | awk '{print($5)}')
-                        size_next=$(curl "$(dirname $erp_url)/" | grep "$erp" | awk '{print($5)}')
+            local ydoy=($(mjd2ydoy $mjd))
+            local wkdow=($(mjd2wkdow $mjd_s))
+            local urls=(
+                "ftp://igs.ign.fr/pub/igs/products/mgex/${wkdow[0]}/WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_01D_ERP.ERP.gz"
+                "ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/orbit/WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_01D_ERP.ERP.gz"
+                "ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/orbit/COD0R03FIN_${ydoy[0]}${ydoy[1]}0000_01D_01D_ERP.ERP.gz"
+            )
+            for url in ${urls[@]}; do
+                if [[ "$url" =~ igs.ign.fr ]]; then
+                    [ -e "$ign_priority_path" ] && [ "${wkdow[0]}" -ge 2290 ] || continue
+                fi
+                local cmp=$(basename "$url")
+                local erp="${cmp/\.[gZ]*/}"
+                CopyOrDownloadProduct "$product_cmn_dir/$erp"        && break
+                CopyOrDownloadProduct "$product_cmn_dir/$cmp" "$url" && break
+            done
+            [ -f "$cmp" ] && gunzip -f "$cmp"
+            if [ ! -f "$erp" ]; then
+                local mjd_t=$(ymd2mjd $(date +"%Y %m %d"))
+                if [ $mjd_e -gt $(($mjd_t-3)) ] && [ "$USERTS" == "YES" ]; then
+                    local url="ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/orbit/WUM0MGXRTS_${ydoy[0]}${ydoy[1]}0000_01D_01D_ERP.ERP.gz"
+                    local cmp=$(basename "$url")
+                    local erp="${cmp/\.[gZ]*/}"
+                    echo -e "$MSGWAR PrepareProducts: failed to download RAP ERP product $cmp, try downloading RTS products"
+                    if [ -f "$product_cmn_dir/$cmp" ]; then
+                        size_last=$(ls -l "$product_cmn_dir/$cmp" | awk '{print($5)}')
+                        size_next=$(curl "$(dirname $url)/" | grep "$erp" | awk '{print($5)}')
                         if [ $? -eq 0 ]; then
-                           if [ "$size_next" -gt "$size_last" ]; then
-                               rm -f "$erp"* "$product_cmn_dir/$erp"*
-                           fi
+                            if [ "$size_next" -gt "$size_last" ]; then
+                                rm -f "$erp"* "$product_cmn_dir/$erp"*
+                            fi
                         fi
                     fi
                     CopyOrDownloadProduct "$product_cmn_dir/$erp"
-                    if [ $? -ne 0 ]; then
-                        CopyOrDownloadProduct "$product_cmn_dir/$erp_cmp" "$erp_url"
-                        if [ $? -ne 0 ]; then
-                            echo -e "$MSGERR PrepareProducts: $erp_cmp download failed"
-                            return 1
-                        fi
-                    fi
+                    [ $? -ne 0 ] && CopyOrDownloadProduct "$product_cmn_dir/$cmp" "$url"
+                else
+                    [ ${ydoy[0]} -ge 2020 ] && local url="${urls[1]}" || local url="${urls[${#urls[@]}-1]}"
+                    local cmp=$(basename "$url")
+                    local erp="${cmp/\.[gZ]*/}"
                 fi
             fi
-            [ -f "$erp_cmp" ] && gunzip -f "$erp_cmp"
-            sed -i "/ERP/s/Default/$erp &/" "$config"
+            [ -f "$cmp" ] && gunzip -f "$cmp"
+            if [ ! -f "$erp" ]; then
+                echo -e "$MSGERR PrepareProducts: failed to download ERP product: $cmp"
+                echo -e "$MSGINF please download from $url to $product_cmn_dir for processing"
+                return 1
+            fi
+            sedi "/ERP/s/Default/$erp &/" "$config"
             custom_pro_erp="$custom_pro_erp $erp"
         done
-        sed -i "/ERP/s/Default//g" "$config"
+        sedi "/ERP/s/Default//g" "$config"
         local argnum=$(echo "$custom_pro_erp" | wc -w)
         if [ $argnum -gt 1 ]; then    
             erp="mererp_${ymd_s}${doy_s}"
             MergeFiles "$(pwd)" "$custom_pro_erp" "$erp"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: $erp merge failed"
+                echo -e "$MSGERR PrepareProducts: failed to merge ERP products: $custom_pro_erp -> $erp"
                 return 1
             fi
             for tmp in $(echo "$custom_pro_erp"); do
                 rm -f "$tmp"
-            done
+            done 
         fi
     fi
 
@@ -1820,17 +2451,17 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
                 if [ $? -ne 0 ]; then
                     CopyOrDownloadProduct "$product_dir/$att"
                     if [ $? -ne 0 ]; then
-                        echo -e "$MSGERR PrepareProducts: no such file: $att"
+                        echo -e "$MSGERR PrepareProducts: no satellit attitude product: $att"
                         return 1
                     fi
-                fi          
+                fi
             done
             local argnum=$(echo "$custom_pro_att" | wc -w)
             if [ $argnum -gt 1 ]; then    
                 att="meratt_${ymd_s}${doy_s}"
                 MergeFiles "$(pwd)" "$custom_pro_att" "$att"
                 if [ $? -ne 0 ]; then
-                    echo -e "$MSGERR PrepareProducts: $att merge failed"
+                    echo -e "$MSGERR PrepareProducts: failed to merge satellite attitude products: $custom_pro_att -> $att"
                     return 1
                 fi
                 for tmp in $(echo "$custom_pro_att"); do
@@ -1841,40 +2472,54 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
     else
         local custom_pro_att=""
         for mjd in $(seq $mjd_s $mjd_e); do
+            if [ "$mjd_s" -lt 49718 ]; then
+                echo -e "$MSGERR no available satellite product for dates before MJD 49718"
+                return 1
+            fi
             local ydoy=($(mjd2ydoy $mjd))
-            if [ $mjd_s -ge 58849 ]; then
-                local att="WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_30S_ATT.OBX"
-                local att_cmp="${att}.gz"
-                local att_url="ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/orbit/${att_cmp}"
-            else
-                custom_pro_att="None"
-                local att="${custom_pro_att}"
-                sed -i "/Quaternions/s/Default/$att/g" "$config"
+            local wkdow=($(mjd2wkdow $mjd_s))
+            local urls=(
+                "ftp://igs.ign.fr/pub/igs/products/mgex/${wkdow[0]}/WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_30S_ATT.OBX.gz"
+                "ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/orbit/WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_30S_ATT.OBX.gz"
+                "ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/orbit/IGS2R03FIN_${ydoy[0]}${ydoy[1]}0000_01D_30S_ATT.OBX.gz"
+            )
+            for url in ${urls[@]}; do
+                if [[ "$url" =~ igs.ign.fr ]]; then
+                    [ -e "$ign_priority_path" ] && [ "${wkdow[0]}" -ge 2290 ] || continue
+                fi
+                local cmp=$(basename "$url")
+                local att="${cmp/\.[gZ]*/}"
+                CopyOrDownloadProduct "$product_cmn_dir/$att"        && break
+                CopyOrDownloadProduct "$product_cmn_dir/$cmp" "$url" && break
+            done
+            [ -f "$cmp" ] && gunzip -f "$cmp"
+            if [ ! -f "$att" ]; then
+                [ ${ydoy[0]} -ge 2020 ] && local url="${urls[1]}" || local url="${urls[${#urls[@]}-1]}"
+                local cmp=$(basename "$url")
+                local att="${cmp/\.[gZ]*/}"
+                echo -e "$MSGWAR PrepareProducts: failed to download satellite attitude product: $cmp"
+                echo -e "$MSGINF please download from $url to $product_cmn_dir for processing"
+				sed -i "/Quaternions/s/Default/NONE/" "$config"
                 break
             fi
-            CopyOrDownloadProduct "$product_cmn_dir/$att"
-            if [ $? -ne 0 ]; then
-                CopyOrDownloadProduct "$product_cmn_dir/$att_cmp" "$att_url"
-                if [ $? -ne 0 ]; then
-                    echo -e "$MSGWAR PrepareProducts: $att_cmp download failed"
-                fi
-            fi
-            [ -f "$att_cmp" ] && gunzip -f "$att_cmp"
-            sed -i "/Quaternions/s/Default/$att &/" "$config"
+            sedi "/Quaternions/s/Default/$att &/" "$config"
             custom_pro_att="$custom_pro_att $att"
         done
-        sed -i "/Quaternions/s/Default//g" "$config"
+        sedi "/Quaternions/s/Default//g" "$config"
         local argnum=$(echo "$custom_pro_att" | wc -w)
-        if [ $argnum -gt 1 ]; then    
+        if [ $argnum -gt 1 ]; then
             att="meratt_${ymd_s}${doy_s}"
             MergeFiles "$(pwd)" "$custom_pro_att" "$att"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: $att merge failed"
+                echo -e "$MSGERR PrepareProducts: failed to merge satellite attitude products: $custom_pro_att -> $att"
                 return 1
             fi
             for tmp in $(echo "$custom_pro_att"); do
                 rm -f "$tmp"
             done
+        elif [ $argnum -eq 0 ]; then
+            att="NONE"
+            sedi "/Quaternions/s/Default/$att/g" "$config"
         fi
     fi
 
@@ -1888,8 +2533,12 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
                 if [ $? -ne 0 ]; then
                     CopyOrDownloadProduct "$product_dir/$fcb"
                     if [ $? -ne 0 ]; then
-                        echo -e "$MSGWAR PrepareProducts: no such file: $fcb"
-                        [ $AR == Y ] && echo -e "$MSGERR no phase bias product: $fcb" && return 1
+                        if [ "$AR" == "Y" ]; then
+                            echo -e "$MSGERR PrepareProducts: no satellite code/phase bias product: $fcb"
+                            return 1
+                        else
+                            echo -e "$MSGWAR PrepareProducts: no satellite code/phase bias product: $fcb"
+                        fi
                     fi
                 fi
             done
@@ -1898,7 +2547,7 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
                 fcb="merfcb_${ymd_s}${doy_s}"
                 MergeFiles "$(pwd)" "$custom_pro_fcb" "$fcb"
                 if [ $? -ne 0 ]; then
-                    echo -e "$MSGERR PrepareProducts: $fcb merge failed"
+                    echo -e "$MSGERR PrepareProducts: failed to merge satellite code/phase bias products: $custom_pro_fcb -> $fcb"
                     return 1
                 fi
                 for tmp in $(echo "$custom_pro_fcb"); do
@@ -1909,84 +2558,280 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
     else
         local custom_pro_fcb=""
         for mjd in $(seq $mjd_s $mjd_e); do
-            local ydoy=($(mjd2ydoy $mjd))
-            local wkdow=($(mjd2wkdow $mjd))
-            if [ $mjd_s -ge 58849 ]; then
-                local fcb="WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_01D_ABS.BIA"
-                local fcb_cmp="${fcb}.gz"
-                local fcb_url="ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/bias/${fcb_cmp}"
-            elif [ $mjd_s -ge 58300 ]; then
-                local fcb="COM${wkdow[0]}${wkdow[1]}.BIA"
-                local fcb_cmp="${fcb}.Z"
-                local fcb_url="ftp://ftp.aiub.unibe.ch/CODE_MGEX/CODE/${ydoy[0]}/${fcb_cmp}"
-            else
-                [ $AR == Y ] && echo -e "$MSGERR no available phase bias product before MJD 58300" && return 1
-                custom_pro_fcb="None"
+            if [ "$mjd_s" -lt 51544 ]; then
+                if [ "$AR" == "Y" ]; then
+                    echo -e "$MSGERR no available satellite code/phase bias product for dates before MJD 51544"
+                    return 1
+                else
+                    echo -e "$MSGINF no available satellite code/phase bias product for dates before MJD 51544"
+                fi
+                custom_pro_fcb="NONE"
                 local fcb="$custom_pro_fcb"
-                sed -i "/Code\/phase bias/s/Default/$fcb/g" "$config"
+                sedi "/Code\/phase bias/s/Default/$fcb/g" "$config"
                 break
             fi
-            CopyOrDownloadProduct "$product_cmn_dir/$fcb"
-            if [ $? -ne 0 ]; then
-                CopyOrDownloadProduct "$product_cmn_dir/$fcb_cmp" "$fcb_url"
-                if [ $? -ne 0 ]; then
-                    echo -e "$MSGWAR PrepareProducts: $fcb_cmp download failed"
-                    [ $AR == Y ] && echo -e "$MSGERR no phase bias product: $fcb" && return 1
+            local ydoy=($(mjd2ydoy $mjd))
+            local wkdow=($(mjd2wkdow $mjd_s))
+            local urls=(
+                "ftp://igs.ign.fr/pub/igs/products/mgex/${wkdow[0]}/WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_01D_OSB.BIA.gz"
+                "ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/bias/WUM0MGXRAP_${ydoy[0]}${ydoy[1]}0000_01D_01D_OSB.BIA.gz"
+                "ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/bias/IGS2R03FIN_${ydoy[0]}${ydoy[1]}0000_01D_01D_OSB.BIA.gz"
+            )
+            for url in ${urls[@]}; do
+                if [[ "$url" =~ igs.ign.fr ]]; then
+                    [ -e "$ign_priority_path" ] && [ "${wkdow[0]}" -ge 2290 ] || continue
+                fi
+                local cmp=$(basename "$url")
+                local fcb="${cmp/\.[gZ]*/}"
+                CopyOrDownloadProduct "$product_cmn_dir/$fcb"        && break
+                CopyOrDownloadProduct "$product_cmn_dir/$cmp" "$url" && break
+            done
+            [ -f "$cmp" ] && gunzip -f "$cmp"
+            if [ ! -f "$fcb" ]; then
+                local mjd_t=$(ymd2mjd $(date +"%Y %m %d"))
+                if [ $mjd_e -gt $(($mjd_t-3)) ] && [ "$USERTS" == "YES" ]; then
+                    local url="ftp://igs.gnsswhu.cn/pub/whu/phasebias/${ydoy[0]}/bias/WUM0MGXRTS_${ydoy[0]}${ydoy[1]}0000_01D_05M_OSB.BIA.gz"
+                    local cmp=$(basename "$url")
+                    local fcb="${cmp/\.[gZ]*/}"
+                    echo -e "$MSGWAR PrepareProducts: failed to download RAP satellite code/phase bias product $cmp, try downloading RTS products"
+                    if [ -f "$product_cmn_dir/$cmp" ]; then
+                        size_last=$(ls -l "$product_cmn_dir/$cmp" | awk '{print($5)}')
+                        size_next=$(curl "$(dirname $url)/" | grep "$fcb" | awk '{print($5)}')
+                        if [ $? -eq 0 ]; then
+                            if [ "$size_next" -gt "$size_last" ]; then
+                                rm -f "$fcb"* "$product_cmn_dir/$fcb"*
+                            fi
+                        fi
+                    fi
+                    CopyOrDownloadProduct "$product_cmn_dir/$fcb"
+                    [ $? -ne 0 ] && CopyOrDownloadProduct "$product_cmn_dir/$cmp" "$url"
+                else
+                    [ ${ydoy[0]} -ge 2020 ] && local url="${urls[1]}" || local url="${urls[${#urls[@]}-1]}"
+                    local cmp=$(basename "$url")
+                    local fcb="${cmp/\.[gZ]*/}"
                 fi
             fi
-            [ -f "$fcb_cmp" ] && gunzip -f "$fcb_cmp"
-            sed -i "/Code\/phase bias/s/Default/$fcb &/" "$config"
+            [ -f "$cmp" ] && gunzip -f "$cmp"
+            if [ ! -f "$fcb" ]; then
+                if [ "$AR" == "Y" ]; then
+                    echo -e "$MSGERR PrepareProducts: failed to download satellite code/phase bias lock product: $cmp"
+                    echo -e "$MSGINF please download from $url to $product_cmn_dir for processing"
+                    return 1
+                else
+                    echo -e "$MSGWAR PrepareProducts: failed to download satellite code/phase bias lock product: $cmp"
+                    echo -e "$MSGINF please download from $url to $product_cmn_dir for processing"
+					sed -i "/Code\/phase bias/s/Default/NONE/" "$config"
+                fi
+                break
+            fi
+            sedi "/Code\/phase bias/s/Default/$fcb &/" "$config"
             custom_pro_fcb="$custom_pro_fcb $fcb"
         done
-        sed -i "/Code\/phase bias/s/Default//g" "$config"
+        sedi "/Code\/phase bias/s/Default//g" "$config" 
         local argnum="$(echo $custom_pro_fcb | wc -w)"
-        if [ $argnum -gt 1 ]; then    
+        if [ $argnum -gt 1 ]; then
             fcb="merfcb_${ymd_s}${doy_s}"
             MergeFiles "$(pwd)" "$custom_pro_fcb" "$fcb"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: $fcb merge failed"
+                echo -e "$MSGERR PrepareProducts: failed to merge satellite code/phase bias products: $custom_pro_fcb -> $fcb"
                 return 1
             fi
             for tmp in $(echo "$custom_pro_fcb"); do
                 rm -f "$tmp"
             done
+        elif [ $argnum -eq 0 ]; then
+            fcb="NONE"
+            sedi "/Code\/phase bias/s/Default/$fcb/g" "$config"
         fi
     fi
+
+    # LEO quaternions
+    local custom_pro_lat=$(get_ctrl "$config" "LEO quaternions")
+    if [ "$mode" == "L" -a "$(echo "$custom_pro_lat" | tr 'a-z' 'A-Z')" != NONE ]; then
+        mkdir -p "$product_leo_dir"
+        if [ "$custom_pro_lat" != Default ]; then
+            local lat="$custom_pro_lat"
+            for lat in $custom_pro_lat; do
+                CopyOrDownloadProduct "$product_leo_dir/$lat"
+                if [ $? -ne 0 ]; then
+                    CopyOrDownloadProduct "$product_dir/$lat"
+                    if [ $? -ne 0 ]; then
+                        echo -e "$MSGERR PrepareProducts: no LEO attitude product: $lat"
+                        return 1
+                    fi
+                fi
+            done
+            local argnum=$(echo "$custom_pro_lat" | wc -w)
+            if [ $argnum -gt 1 ]; then
+                lat="merlat_${ymd_s}${doy_s}"
+                MergeFiles "$(pwd)" "$custom_pro_lat" "$lat"
+                if [ $? -ne 0 ]; then
+                    echo -e "$MSGERR PrepareProducts: failed to merge LEO attitude products: $custom_pro_lat -> $lat"
+                    return 1
+                fi
+                for tmp in $(echo "$custom_pro_lat"); do
+                    rm -f "$tmp"
+                done
+            fi
+        else
+            local custom_pro_lat=""
+            for mjd in $(seq $mjd_s $mjd_e); do
+                local ydoy=($(mjd2ydoy $mjd))
+                lat="lat_${ydoy[0]}${ydoy[1]}_${site}"
+                CopyOrDownloadProduct "$product_leo_dir/$lat"
+                if [ $? -ne 0 ]; then
+                    CopyOrDownloadProduct "$product_dir/$lat"
+                    if [ $? -ne 0 ]; then
+                        echo -e "$MSGWAR PrepareProducts: no LEO attitude product: $lat"
+                        echo -e "$MSGINF please download with prepare_leodata.sh to $product_leo_dir for processing"
+                        custom_pro_lat="NONE"
+                        local lat="$custom_pro_lat"
+                        sedi "/LEO quaternions/s/Default/$lat/" "$config"
+                        break
+                    fi
+                fi
+                sedi "/LEO quaternions/s/Default/$lat &/" "$config"
+                custom_pro_lat="$custom_pro_lat $lat"
+            done
+            sedi "/LEO quaternions/s/Default//g" "$config"
+            local argnum=$(echo "$custom_pro_lat" | wc -w)
+            if [ $argnum -gt 1 ]; then
+                lat="merlat_${ymd_s}${doy_s}"
+                MergeFiles "$(pwd)" "$custom_pro_lat" "$lat"
+                if [ $? -ne 0 ]; then
+                    echo -e "$MSGERR PrepareProducts: failed to merge LEO attitude products: $custom_pro_lat -> $lat"
+                    return 1
+                fi
+                for tmp in $(echo "$custom_pro_lat"); do
+                    rm -f "$tmp"
+                done
+            elif [ $argnum -eq 0 ]; then
+                lat="NONE"
+                sedi "/LEO quaternions/s/Default/$lat/g" "$config"
+            fi
+        fi
+    else
+        custom_pro_lat="NONE"
+        local lat="$custom_pro_lat"
+        sedi "/LEO quaternions/s/Default/$lat/" "$config"
+    fi
+
+    # Check Multipath and RTS product
+    custom_pro_sp3=$(get_ctrl "$config" "Satellite orbit")
+    custom_pro_clk=$(get_ctrl "$config" "Satellite clock")
+    custom_pro_erp=$(get_ctrl "$config" "ERP")
+    custom_pro_att=$(get_ctrl "$config" "Quaternions")
+    custom_pro_fcb=$(get_ctrl "$config" "Code/phase bias")
+
+    if [[ ( "$custom_pro_sp3" == *"RTS"* ) || \
+          ( "$custom_pro_clk" == *"RTS"* ) || \
+          ( "$custom_pro_erp" == *"RTS"* ) || \
+          ( "$custom_pro_att" == *"RTS"* ) || \
+          ( "$custom_pro_fcb" == *"RTS"* ) ]] && \
+       [[ "$mul" == "YES" ]]; then
+        echo -e "$MSGERR PrepareProducts: RTS products cannot be used for multipath correction"
+        return 1
+    fi
+
+
 
     # Check satellite orbit
     if [ -f "$sp3" ]; then
         head -1 "$sp3" | grep -q "^#a"
         if [ $? -eq 0 ]; then
-            echo -e "$MSGERR unsupproted ephemeris version (#a): $custom_pro_sp3"
+            echo -e "$MSGERR unsupproted SP3 version (#a): $custom_pro_sp3"
             return 1
         fi
         local avail_sys=("G" "R" "E" "C" "J")
         for sys in ${avail_sys[@]}; do
             grep -Eq "^ $sys[0-9][0-9] " "$ctrl_file" || continue
             if ! grep -q "^+ .*$sys[0-9][0-9]" "$sp3"; then
-                echo -e "$MSGWAR no ephemerides for GNSS ($sys): $custom_pro_sp3"
+                echo -e "$MSGWAR no satellite orbit for GNSS ($sys): $custom_pro_sp3"
             fi
         done
     fi
 
     # Check code/phase biases
     if [ -f "$fcb" ]; then
-        if [ $AR == Y ]; then
-            if ! grep -q "^ OSB " "$fcb"; then
-                echo -e "$MSGERR unsupported phase bias type (not OSB): $custom_pro_fcb"
-                return 1
+        if ! grep -q "^ OSB " "$fcb"; then
+            echo -e "$MSGERR unsupported bias type (not OSB): $custom_pro_fcb"
+            [ "$AR" == "Y" ] && return 1 || rm -f "$fcb"
+        fi
+
+        local obs_cand sys_num sys num
+        local tna_cand tna fq1 fq2
+        local freq_cmb=($(get_ctrl "$ctrl_file" "Frequency combination"))
+        for sys_num in ${freq_cmb[@]}; do
+            sys=${sys_num:0:1}
+            grep -q "^ $sys[0-9][0-9] " "$ctrl_file" || continue
+            obs_cand+=("${sys}XX")
+            num=${sys_num:1:1}
+            obs_cand+=("${sys}C${num}")
+            obs_cand+=("${sys}L${num}")
+            num=${sys_num:2:1}
+            obs_cand+=("${sys}C${num}")
+            obs_cand+=("${sys}L${num}")
+        done
+
+        for sys_num in ${obs_cand[@]}; do
+            sys="${sys_num:0:1}"
+            grep -q "OSB .* $sys[0-9][0-9] .* ${sys_num:1:2}" "$fcb" || continue
+            obs_cand=("${obs_cand[@]/"$sys_num"}")
+            obs_cand=("${obs_cand[@]/"${sys}XX"}")
+        done
+
+        local avail_sys=("G" "R" "E" "C" "J")
+        for sys in ${avail_sys[@]}; do
+            grep -Eq "^ $sys[0-9][0-9] " "$ctrl_file" || continue
+            if echo "${obs_cand[@]}" | grep -q "${sys}XX"; then
+                echo -e "$MSGWAR no OSB for GNSS ($sys)"
+                continue
             fi
-        else
-            if ! grep -q "^ OSB " "$fcb"; then
-                echo -e "$MSGWAR unsupported phase bias type (not OSB): $custom_pro_fcb"
-                rm -f "$fcb"
+            sys_num=($(echo "${obs_cand[@]}" | grep -o "$sys\w\w" | cut -c 2-3))
+            if [ ${#sys_num[@]} -ne 0 ]; then
+                [[ "$sys" == "R" ]] && [[ "${sys_num[@]}" == "L1 L2" ]] && continue
+                echo -e "$MSGWAR no OSB for GNSS ($sys): ${sys_num[@]}"
+                continue
             fi
+        done
+
+        if  [[ $(head -1 "$rinexobs" | cut -c 6) == "3" ]]; then
+            local obstypes=$(grep "SYS / # / OBS TYPES" "$rinexobs")
+            while IFS= read -r line; do
+                if [[ " " != $(echo "$line" | cut -c 1) ]]; then
+                    sys=$(echo "$line" | cut -c 1) && tna_cand=("") && fq1=" " && fq2=" "
+                    grep -q "^ $sys[0-9][0-9] " "$config"      || continue
+                    echo "${obs_cand[@]}" | grep -q "${sys}XX" && continue
+                    echo "${obs_cand[@]}" | grep -q "${sys}${fq1}X" || fq1=$(echo "${freq_cmb[@]}" | grep -o "${sys}[0-9][0-9]" | cut -c 2)
+                    echo "${obs_cand[@]}" | grep -q "${sys}${fq2}X" || fq2=$(echo "${freq_cmb[@]}" | grep -o "${sys}[0-9][0-9]" | cut -c 3)
+                fi
+                tna_cand+=($(echo "$line" | grep -o " C${fq1}[A-Z] "))
+                tna_cand+=($(echo "$line" | grep -o " C${fq2}[A-Z] "))
+                for tna in ${tna_cand[@]}; do
+                    grep -q "OSB .* $sys[0-9][0-9] .* $tna" "$fcb" && continue
+                    echo -e "$MSGWAR no OSB for GNSS ($sys): $tna"
+                    tna_cand=("${tna_cand[@]/$tna}")
+                done
+            done <<< "$obstypes"
         fi
     fi
-    
+
+    # APC model for code/phase biases
+    local apc_setting=$(get_ctrl "$ctrl_file" "PCO on wide-lane")
+    if [ "$apc_setting" == "Default" ]; then
+        local apc_keyword=$(grep "APC_MODEL" "$fcb" | head -1 | awk '{print($2)}')
+        if [[ -n "$apc_keyword" ]] && [[ "$apc_keyword" =~ ^NO* ]]; then
+            sedi "/^PCO on wide-lane/s/ = .*/ = NO/"  "$ctrl_file"
+        else
+            sedi "/^PCO on wide-lane/s/ = .*/ = YES/" "$ctrl_file"
+        fi
+    fi
+
     # IGS ANTEX
     local abs_atx abs_url
     abs_atx="$(grep "SYS / PCVS APPLIED" $clk | head -1 | cut -c21-34 | tr 'A-Z' 'a-z' | sed 's/r3/R3/; s/ //g')"
+
+    ### CODE MGEX ANTEX
     echo "$custom_pro_clk" | grep -qE "^ *(COD0MGX|COM)"
     if [[ $? -eq 0 ]] && [[ $abs_atx == "igs14" ]]; then
         [[ "$mjd_s" -le 59336 ]] && abs_atx="M14.ATX" || abs_atx="M20.ATX"
@@ -1995,12 +2840,12 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
 
     if [ -n "$abs_atx" ]; then
         [[ "$abs_atx" =~ \.(ATX|atx)$ ]] || abs_atx="${abs_atx}.atx"
-        echo -e "$MSGINF Prepare IGS ANTEX product: $abs_atx ..."
+        echo -e "$MSGINF Prepare IGS ANTEX file: $abs_atx ..."
     else
-        [[ "$OFFLINE" == "NO" ]] && abs_atx=$(curl https://files.igs.org/pub/station/general/ | grep -Eo "igs14_[0-9]{4}.atx" | tail -1)
-        [[ $? -eq 0 ]] || abs_atx="igs14_2223.atx"
-        echo -e "$MSGINF Prepare IGS ANTEX product: $abs_atx ..."
-        echo -e "$MSGWAR no PCO/PCV model defined in $clk, use default instead"
+        [[ "$OFFLINE" == "NO" ]] && abs_atx=$(curl https://files.igs.org/pub/station/general/ | grep -Eo "igs[0-9]{2}_[0-9]{4}.atx" | tail -1)
+        [ -n "$abs_atx" ] || abs_atx=$(ls "$table_dir" | grep -Eo "igs[0-9]{2}_[0-9]{4}.atx" | tail -1)
+        echo -e "$MSGINF Prepare IGS ANTEX file: $abs_atx ..."
+        echo -e "$MSGWAR no PCO/PCV model specified in clock product $clk, use $table_dir/$abs_atx instead"
     fi
 
     if [ -f "$table_dir/$abs_atx" ]; then
@@ -2009,18 +2854,19 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
         if [ -n "$atx_url" ]; then
             WgetDownload "$atx_url"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: failed to download $abs_atx"
-                echo -e "$MSGINF please download this file from $atx_url"
+                echo -e "$MSGERR PrepareProducts: failed to download ANTEX file: $abs_atx"
+                echo -e "$MSGINF please download from $atx_url to $table_dir for processing"
                 return 1
             fi
-        elif [[ $abs_atx =~ ^igs(05|08|14) ]]; then
+        elif [[ $abs_atx =~ ^igs[0-9]{2} ]]; then
             atx_url="https://files.igs.org/pub/station/general/$abs_atx"
             WgetDownload "$atx_url"
             if [ $? -ne 0 ]; then
                 atx_url="https://files.igs.org/pub/station/general/pcv_archive/$abs_atx"
                 WgetDownload "$atx_url"
                 if [ $? -ne 0 ]; then
-                    echo -e "$MSGERR PrepareProducts: failed to download $abs_atx"
+                    echo -e "$MSGERR PrepareProducts: failed to download ANTEX file: $abs_atx"
+                    echo -e "$MSGINF please download from $atx_url to $table_dir for processing"
                     return 1
                 fi
             fi
@@ -2031,7 +2877,8 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
                 atx_url="ftp.aiub.unibe.ch/users/villiger/$abs_atx"
                 WgetDownload "$atx_url"
                 if [ $? -ne 0 ]; then
-                    echo -e "$MSGERR PrepareProducts: failed to download $abs_atx"
+                    echo -e "$MSGERR PrepareProducts: failed to download ANTEX file: $abs_atx"
+                    echo -e "$MSGINF please download from $atx_url to $table_dir for processing"
                     return 1
                 fi
             fi
@@ -2045,15 +2892,24 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
         fi
     fi
 
-    echo -e "$MSGINF Prepare IGS ANTEX product: $abs_atx done"
+    ### LEO ANTEX 
+    if [ "$mode" == "L" ]; then
+        grep -q "^${site}  .*TYPE / SERIAL NO$" abs_igs.atx || leoatx.py abs_igs.atx ${site}
+    fi
 
-    # Precise station coordinate
-    local mode=$(grep "^ .... [KSF]" "$config" | cut -c 7)
+    echo -e "$MSGINF Prepare IGS ANTEX file: $abs_atx done"
+
+    # Position SINEX solution 
     if [ "$mode" == "F" ]; then
         [ "$OFFLINE" == "NO" ] && mkdir -p "$product_ssc_dir"
         local wkdow=($(mjd2wkdow $mjd_s))
-        local ssc="igs${ymd_s:2:2}P${wkdow[0]}${wkdow[1]}.ssc"
-        local ssc_cmp="${ssc}.Z"
+        if [ ${wkdow[0]} -lt 2238 ]; then
+            local ssc="igs${ymd_s:2:2}P${wkdow[0]}${wkdow[1]}.ssc"
+            local ssc_cmp="${ssc}.Z"
+        else
+            local ssc="IGS0OPSSNX_${ymd_s}${doy_s}0000_01D_01D_CRD.SNX"
+            local ssc_cmp="${ssc}.gz"
+        fi
         CopyOrDownloadProduct "$product_ssc_dir/$ssc"
         if [ $? -ne 0 ]; then
             for ssc_url in "ftp://igs.gnsswhu.cn/pub/gps/products/$wkdow" \
@@ -2063,60 +2919,69 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
                 [ $? -eq 0 ] && break
             done
             if [ ! -f "$ssc_cmp" ]; then
-                echo -e "$MSGWAR PrepareProducts: $ssc_cmp download failed"
-                echo -e "$MSGERR no station coordinate product: $ssc"
-                return 1
+                echo -e "$MSGWAR PrepareProducts: failed to download position SINEX solution: $ssc_cmp"
+                if [ ! -f sit.xyz ]; then
+                    echo -e "$MSGERR no position SINEX solution: $ssc"
+                    echo -e "$MSGINF please download from $ssc_url to $product_ssc_dir for processing"
+                    return 1
+                fi
             fi
         fi
         [ -f "$ssc_cmp" ] && gunzip -f "$ssc_cmp"
     fi
 
-    # High-order ionospheric grid
+    # GIM (global ionospheric maps)
     local ion tec num
     if [ "$(get_ctrl "$config" "Iono 2nd")" == "YES" ]; then
-        echo -e "$MSGSTA Downloading High-order Ion Grid ..."
+        echo -e "$MSGSTA Downloading GIM products ..."
         [ "$OFFLINE" == "NO" ] && mkdir -p "$product_ion_dir"
         for mjd in $(seq $mjd_s $mjd_e); do
             local ydoy=($(mjd2ydoy $mjd))
-            local ion_tmp="CODG${ydoy[1]}0.${ydoy[0]:2:2}I"
-            local ion_cmp="${ion_tmp}.Z"
+            if [ $mjd -le 59909 ]; then
+                local ion_tmp="CODG${ydoy[1]}0.${ydoy[0]:2:2}I"
+                local ion_cmp="${ion_tmp}.Z"
+            else
+                local ion_tmp="COD0OPSFIN_${ydoy[0]}${ydoy[1]}0000_01D_01H_GIM.INX"
+                local ion_cmp="${ion_tmp}.gz"
+            fi
             local ion_url="ftp://ftp.aiub.unibe.ch/CODE/${ydoy[0]}/${ion_cmp}"
             CopyOrDownloadProduct "$product_ion_dir/$ion_tmp"
             if [ $? -ne 0 ]; then
                 CopyOrDownloadProduct "$product_ion_dir/$ion_cmp" "$ion_url"
                 if [ $? -ne 0 ]; then
-                    echo -e "$MSGERR PrepareProducts: $ion_cmp download failed"
+                    echo -e "$MSGERR PrepareProducts: failed to download GIM product: $ion_cmp"
+                    echo -e "$MSGINF please download from $ion_url to $product_ion_dir for processing"
                     return 1
                 fi
             fi
             [ -f "$ion_cmp" ] && gunzip -f "$ion_cmp"
             ion="$ion $ion_tmp"
         done
-        echo -e "$MSGSTA Downloading High-order Ion Grid done"
+        echo -e "$MSGSTA Downloading GIM products done"
         tec="tec_${ymd_s}${doy_s}"
         num="$(echo $ion | wc -w)"
-        if [ $num -gt 1 ]; then    
+        if [ $num -gt 1 ]; then
             MergeFiles "$(pwd)" "$ion" "$tec"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: $tec merge failed"
+                echo -e "$MSGERR PrepareProducts: failed to merge GIM products: $ion -> $tec"
                 return 1
             fi
             rm -f "$ion"
         else
             mv -f "$ion_tmp" "$tec"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: $tec rename failed"
+                echo -e "$MSGERR PrepareProducts: failed to rename GIM product: $ion_tmp -> $tec"
                 return 1
             fi
         fi
     fi
 
-    # Vienna mapping function grid
+    # VMF (Vienna mapping function) grid
     local tmpy mjd hour
 
     grep '^ [0-9a-zA-Z]\{4\} .*VM1' "$config" &>/dev/null
     if [ $? -eq 0 ]; then
-        echo -e "$MSGSTA Downloading VMF1 Grid ..."
+        echo -e "$MSGSTA Downloading VMF1 grid products ..."
         [ "$OFFLINE" == "NO" ] && mkdir -p "$product_vmf_dir"
 
         # Previous Day (for interpolation)
@@ -2128,7 +2993,8 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
         if [ $? -ne 0 ]; then
             CopyOrDownloadProduct "$product_vmf_dir/$vmf" "$vmf_url"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: $vmf download failed"
+                echo -e "$MSGERR PrepareProducts: failed to download VMF1 grid product: $vmf"
+                echo -e "$MSGINF please download from $vmf_url to $product_vmf_dir for processing"
                 return 1
             fi
         fi
@@ -2144,7 +3010,8 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
                 if [ $? -ne 0 ]; then
                     CopyOrDownloadProduct "$product_vmf_dir/$vmf" "$vmf_url"
                     if [ $? -ne 0 ]; then
-                        echo -e "$MSGERR PrepareProducts: $vmf download failed"
+                        echo -e "$MSGERR PrepareProducts: failed to download VMF1 grid product: $vmf"
+                        echo -e "$MSGINF please download from $vmf_url to $product_vmf_dir for processing"
                         return 1
                     fi
                 fi
@@ -2160,18 +3027,19 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
         if [ $? -ne 0 ]; then
             CopyOrDownloadProduct "$product_vmf_dir/$vmf" "$vmf_url"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: $vmf download failed"
+                echo -e "$MSGERR PrepareProducts: failed to download VMF1 grid product: $vmf"
+                echo -e "$MSGINF please download from $vmf_url to $product_vmf_dir for processing"
                 return 1
             fi
         fi
 
         cat VMFG_* > vmf_${ymd_s}${doy_s} || return 1
-        echo -e "$MSGSTA Downloading VMF1 Grid done"
+        echo -e "$MSGSTA Downloading VMF1 grid product done"
     fi
 
     grep '^ [0-9a-zA-Z]\{4\} .*VM3' "$config" &>/dev/null
     if [ $? -eq 0 ]; then
-        echo -e "$MSGSTA Downloading VMF3 Grid ..."
+        echo -e "$MSGSTA Downloading VMF3 grid products ..."
         [ "$OFFLINE" == "NO" ] && mkdir -p "$product_vmf_dir"
 
         # Previous Day (for interpolation)
@@ -2183,7 +3051,8 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
         if [ $? -ne 0 ]; then
             CopyOrDownloadProduct "$product_vmf_dir/$vmf" "$vmf_url"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: $vmf download failed"
+                echo -e "$MSGERR PrepareProducts: failed to download VMF3 grid product: $vmf"
+                echo -e "$MSGINF please download from $vmf_url to $product_vmf_dir for processing"
                 return 1
             fi
         fi
@@ -2199,7 +3068,8 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
                 if [ $? -ne 0 ]; then
                     CopyOrDownloadProduct "$product_vmf_dir/$vmf" "$vmf_url"
                     if [ $? -ne 0 ]; then
-                        echo -e "$MSGERR PrepareProducts: $vmf download failed"
+                        echo -e "$MSGERR PrepareProducts: failed to download VMF3 grid product: $vmf"
+                        echo -e "$MSGINF please download from $vmf_url to $product_vmf_dir for processing"
                         return 1
                     fi
                 fi
@@ -2215,22 +3085,23 @@ PrepareProducts() { # purpose : prepare PRIDE-PPPAR needed products in working d
         if [ $? -ne 0 ]; then
             CopyOrDownloadProduct "$product_vmf_dir/$vmf" "$vmf_url"
             if [ $? -ne 0 ]; then
-                echo -e "$MSGERR PrepareProducts: $vmf download failed"
+                echo -e "$MSGERR PrepareProducts: failed to download VMF3 grid product: $vmf"
+                echo -e "$MSGINF please download from $vmf_url to $product_vmf_dir for processing"
                 return 1
             fi
         fi
 
         cat VMF3_* > vmf_${ymd_s}${doy_s} || return 1
-        echo -e "$MSGSTA Downloading VMF3 Grid done"
+        echo -e "$MSGSTA Downloading VMF3 grid products done"
     fi
 
     # Rename products
-    mv -f ${clk} sck_${ymd_s}${doy_s} || return 1
-    [ -e ${fcb} ] && mv -f ${fcb} fcb_${ymd_s}${doy_s}
-    [ -e ${att} ] && mv -f ${att} att_${ymd_s}${doy_s}
-
-    # Generate igserp
-    mv -f ${erp} igserp || return 1
+    mv -f "${clk}" sck_${ymd_s}${doy_s} || return 1
+    mv -f "${erp}" igserp               || return 1
+    [ -e  "${fcb}" ] && mv -f "${fcb}" "fcb_${ymd_s}${doy_s}"
+    [ -e  "${att}" ] && mv -f "${att}" "att_${ymd_s}${doy_s}"
+    [ -e  "${ssc}" ] && mv -f "${ssc}" "snx_${ymd_s}${doy_s}"
+    [ -e  "${lat}" ] && mv -f "${lat}" "lat_${ymd_s}${doy_s}"
 
     echo -e "$MSGSTA PrepareProducts done"
 }
@@ -2281,10 +3152,17 @@ WgetDownload() { # purpose : download a file with wget
     local arg="-q -nv -nc -c -t 3 --connect-timeout=10 --read-timeout=60"
     [ -n "$url" ] && [ "$OFFLINE" = "NO" ] || return 1
 
-    wget --help | grep -q "\-\-show\-progress" && arg="$arg --show-progress"
-    local cmd="wget $arg $url"
-    echo "$cmd" | bash
-
+    local wget_ver=$(wget --version | head -n 1 | awk '{print $3}')
+    if [[ $wget_ver =~ ^1(\.[0-9]+){0,2}$ ]]; then
+       wget --help | grep -q "\--show-progress" && arg="$arg --show-progress"
+       local cmd="wget $arg $url"
+       echo "$cmd" | bash
+    else
+       echo "wget version isn't 1, using curl: $url"
+       arg="--progress-bar -S -C - --retry 3 --connect-timeout 10 --max-time 60 -O"
+       local cmd="curl $arg $url"
+       echo "$cmd" | bash
+    fi
     [ -e $(basename "$url") ] && return 0  || return 1
 }
 
@@ -2300,9 +3178,9 @@ CleanAll() { # purpose : clean all files generated by PRIDE-PPPAR in the work di
              # usage   : CleanAll year doy
     local year=$1
     local doy=$2
+    rm -f igserp config\.*
     local types typ
-    rm -f sit.xyz igserp config\.*
-    types=(rck ztd htg amb res stt cst neq att fcb orb sck)
+    types=(rck ztd htg amb res stt cst neq att fcb orb sck snx)
     for typ in ${types[*]}; do
         rm -f ${typ}_${year}${doy}
     done
@@ -2343,6 +3221,8 @@ Execute() {
         return 0
     else
         echo -e "${RED}($time)${NC} ${CYAN}$cmd${NC} execution failed"
+        echo -e "$MSGINF Here is the output:\n"
+        echo "$cmd" | bash
         return 1
     fi
 }
@@ -2362,27 +3242,228 @@ ExecuteWithoutOutput() {
     fi
 }
 
+PrepareMhmModel() { # purpose : determine the number of days required for modeling and calculate the corresponding residual file to establish an MHM model
+                    # usage   : mjd_s rnxo_path ctrl_file mhm_dir mul_use work_dir  
+    local mjd_use="$1"
+    local rnxo_path="$2"
+    local ctrl_file="$3"
+    local mhm_dir="$4"
+    local mul_use="$5"
+    local work_dir="$6”"
+
+    local mul_day=10
+    local tmpydoy tmpfobs
+    local rnxo_name=$(basename "$rnxo_path")
+    local rinex_dir=$(dirname  "$rnxo_path")
+    local site=$(grep "^ .... [A-Z]" "$ctrl_file" | cut -c 2-5)     
+
+    local sat_line=$(awk '/\+GNSS satellites/,/-GNSS satellites/' $ctrl_file | grep -v '^[*#]' | awk '{print substr($1, 1, 1)}' | sort | uniq)
+    local sys_use=$(echo "$sat_line" | tr -d '\n')
+    echo -e "$MSGSTA PrepareMhmModel ..."
+    rm -f "$work_dir/mhm_${rnxo_name:0:4}"
+    if [[ $sys_use == *G* ]]; then
+        mul_day=1
+    fi
+    if [[ $sys_use == *C* ]]; then
+        mul_day=7
+    fi    
+    if [[ $sys_use == *R* ]]; then
+        mul_day=8
+    fi
+    if [[ $sys_use == *E* ]]; then
+        mul_day=10
+    fi
+    tmpydoy=($(mjd2ydoy ${mjd_use}))
+    tmpydoy_td=($(mjd2ydoy ${mjd_use}))
+    readonly local RNXO2D_GLOB="${rnxo_name:0:4}${tmpydoy[1]}0.${tmpydoy[0]:2:2}@(o|O)"
+    readonly local RNXO3D_GLOB="${rnxo_name:0:9}_?_${tmpydoy[0]}${tmpydoy[1]}0000_01D_???_?O.@(rnx|RNX)"
+
+    local res_dir="$mhm_dir/${tmpydoy[0]}${tmpydoy[1]}/resfile"
+    rm -rf "$res_dir"
+    mkdir -p "$res_dir"
+    if [ $mul_use -ge 0 ]; then
+        local mjd_s=$(($mjd_use - $mul_day-$mul_use))
+        local mjd_e=$(($mjd_use - 1))
+    else
+        local mjd_s=$(($mjd_use + 1))
+        local mjd_e=$(($mjd_use + $mul_day-$mul_use))
+    fi
+    for mjd in $(seq $mjd_s $mjd_e); 
+    do
+        tmpydoy=($(mjd2ydoy ${mjd}))
+        tmpfres="$mhm_dir/${tmpydoy[0]}/${tmpydoy[1]}/res_${tmpydoy[0]}${tmpydoy[1]}_${site}"
+        tmpfpos="$mhm_dir/${tmpydoy[0]}/${tmpydoy[1]}/pos_${tmpydoy[0]}${tmpydoy[1]}_${site}"
+        tmpfcon="$mhm_dir/config_mhm_${tmpydoy[0]}${tmpydoy[1]}" 
+        case "$rnxo_name" in
+        $RNXO2D_GLOB )
+            tmpfobs="$rinex_dir/${rnxo_name:0:4}${tmpydoy[1]}0.${tmpydoy[0]:2:2}${rnxo_name:11}"
+            ;;
+        $RNXO3D_GLOB )
+            tmpfobs="$rinex_dir/${rnxo_name:0:12}${tmpydoy[0]}${tmpydoy[1]}${rnxo_name:19}"
+            ;;
+        * )
+            tmpfobs="$rinex_dir/$rnxo_name"
+            >&2 echo -e "$MSGWAR illegal naming convention: $tmpfobs"
+            exit 1
+            ;;
+        esac
+        cp "$ctrl_file" "$tmpfcon"
+        sedi "/^Interval/s/ = .*/ = Default/" "$tmpfcon"
+        sedi "/^Multipath/s/ = .*/ = NO/" "$tmpfcon"
+ 
+        mhm_pro_opts=("Satellite orbit" "Satellite clock" "ERP" "Quaternions" "Code/phase bias")
+        for mhm_pro_opt in "${mhm_pro_opts[@]}"; do
+            mhm_pro_flag=0
+            mhm_pro_gets=$(get_ctrl "$ctrl_file" "$mhm_pro_opt")
+            mhm_pro_opt=$(printf '%s\n' "$mhm_pro_opt" | sed 's/[\/&]/\\&/g')
+            if [[ "$mhm_pro_gets" != "NONE" && "$mhm_pro_gets" != "Default" ]]; then
+                for mhm_pro_get in $mhm_pro_gets; do
+                     if [[ "$mhm_pro_get" == *"${tmpydoy_td[0]}${tmpydoy_td[1]}"* ]]; then
+                         mhm_pro_flag=1
+                         mhm_pro_set="${mhm_pro_get//${tmpydoy_td[0]}${tmpydoy_td[1]}/${tmpydoy[0]}${tmpydoy[1]}}"
+                         sedi "/^$mhm_pro_opt/s/ = .*/ = $mhm_pro_set/" "$tmpfcon"
+                     fi 
+                done   
+                if [ "$mhm_pro_flag" -eq 0 ]; then      
+                    >&2 echo -e "$MSGERR illegal naming product: $mhm_pro_gets"
+                    exit 1
+                fi
+            fi    
+        done
+
+        mkdir -p "$mhm_dir/${tmpydoy[0]}/${tmpydoy[1]}" 		
+        [ -f "$tmpfres" ] \
+            || (pdp3 -f -m S -cfg $tmpfcon $tmpfobs  \
+             && find "$mhm_dir/${tmpydoy[0]}/${tmpydoy[1]}/" -type f \
+                 -not -name "res_${tmpydoy[0]}${tmpydoy[1]}_${site}" \
+                 -not -name "pos_${tmpydoy[0]}${tmpydoy[1]}_${site}" \
+                 -exec rm -f {} \;)     
+      
+        if [ -f "$tmpfpos" ]; then
+            custom_pro_sp3=$(grep -i "SAT ORBIT" "$tmpfpos" | awk '{print $1}')
+            custom_pro_clk=$(grep -i "SAT CLOCK" "$tmpfpos" | awk '{print $1}')
+            custom_pro_erp=$(grep -i "EARTH ROTATION PARAMETERS" "$tmpfpos" | awk '{print $1}')
+            custom_pro_att=$(grep -i "SAT ATTITUDE" "$tmpfpos" | awk '{print $1}')
+            custom_pro_fcb=$(grep -i "SAT BIAS" "$tmpfpos" | awk '{print $1}')
+            if [[ ( "$custom_pro_sp3" == *"RTS"* ) || \
+                  ( "$custom_pro_clk" == *"RTS"* ) || \
+                  ( "$custom_pro_erp" == *"RTS"* ) || \
+                  ( "$custom_pro_att" == *"RTS"* ) || \
+                  ( "$custom_pro_fcb" == *"RTS"* ) ]]; then
+                >&2 echo -e "$MSGERR PrepareProducts: RTS products cannot be used for multipath correction"
+                rm "$tmpfres" "$tmpfpos"
+                exit 1
+            fi
+            rm "$tmpfpos"
+        fi
+
+        if [ -f "$tmpfres" ]; then
+            cp -f "$tmpfres" "$res_dir"
+            echo -e "$MSGSTA PrepareResfile ${tmpydoy[0]} ${tmpydoy[1]} done"
+        else
+            >&2 echo -e "$MSGWAR $tmpfres doesn't exist"
+        fi
+        rm "$tmpfcon"
+    done
+    lack_flag=0
+    echo -e "$MSGSTA The data used for MHM modeling is as follows:"
+    for mjd in $(seq $mjd_s $mjd_e);
+    do
+        tmpydoy=($(mjd2ydoy ${mjd}))
+        tmpfres="$res_dir/res_${tmpydoy[0]}${tmpydoy[1]}_${site}"
+        if [ -f "$tmpfres" ]; then
+            echo -e "    ${tmpydoy[0]}    ${tmpydoy[1]}    res_${tmpydoy[0]}${tmpydoy[1]}_${site}"
+        else
+            lack_flag=1
+        fi
+    done
+    if [ $lack_flag -eq 1 ]; then
+        >&2 echo -e "$MSGWAR The lacking data is as follows:"
+        for mjd in $(seq $mjd_s $mjd_e);
+        do
+            tmpydoy=($(mjd2ydoy ${mjd}))
+            tmpfres="$res_dir/res_${tmpydoy[0]}${tmpydoy[1]}_${site}"
+            if [ ! -f "$tmpfres" ]; then
+                echo -e "    ${tmpydoy[0]}    ${tmpydoy[1]}    res_${tmpydoy[0]}${tmpydoy[1]}_${site}"
+            fi        
+        done
+    fi
+    tmpydoy=($(mjd2ydoy ${mjd_use}))
+    cd "$mhm_dir/${tmpydoy[0]}${tmpydoy[1]}"
+    mhm resfile 
+    cd "$mhm_dir" 
+    echo -e "$MSGSTA PrepareMhmModel done"
+}
+
+ApplyMhmModel() { # purpose : apply the MHM model to the last lsq for multipath correction
+                  # usage   : ctrl_file rnxo_path mjd_use
+    local ctrl_file="$1"
+    local rinexobs="$2"
+    local mjd_use="$3"
+
+    local cmd=""
+    local tmpydoy
+    ctrl_file=$(basename "$ctrl_file")
+    local site=$(grep "^ .... [A-Z]" "$ctrl_file" | cut -c 2-5)
+    tmpydoy=($(mjd2ydoy ${mjd_use}))
+
+    mv "mhm/${tmpydoy[0]}${tmpydoy[1]}/mhm_${site}" . 
+    rm -rf "mhm/${tmpydoy[0]}${tmpydoy[1]}"
+    cmd="lsq \"${ctrl_file}\" \"${rinexobs}\""
+    ExecuteWithoutOutput "$cmd" || return 1
+    if [ $? -ne 0 ]; then
+        echo -e "$MSGERR apply MHM model failed"
+    fi
+}
+
+GetMaxDistance() { # purpose : get max distance from file
+                   # usage   : filename
+    local filename="$1"
+    local start_line=$(grep -n "END OF HEADER" "$filename" | cut -d: -f1)
+    ((start_line++))
+    read min_x max_x min_y max_y min_z max_z < <(awk "NR>$start_line {
+        if (NR == $start_line + 1) {
+            min_x = max_x = \$3;
+            min_y = max_y = \$4;
+            min_z = max_z = \$5;
+        }
+        if (\$3 < min_x) min_x = \$3;
+        if (\$3 > max_x) max_x = \$3;
+        if (\$4 < min_y) min_y = \$4;
+        if (\$4 > max_y) max_y = \$4;
+        if (\$5 < min_z) min_z = \$5;
+        if (\$5 > max_z) max_z = \$5;
+    }
+    END {
+        print min_x, max_x, min_y, max_y, min_z, max_z
+    }" "$filename")
+    distance=$(echo "sqrt(($max_x - $min_x)^2 + ($max_y - $min_y)^2 + ($max_z - $min_z)^2)" | bc -l)
+    echo "$distance"
+}
+
 snx2sit() {
     local site="$1"
     local mjd="$2"
     local wkdow=($(mjd2wkdow $mjd))
     local ydoy=($(mjd2ydoy $mjd))
-    local igsssc="igs${ydoy:2:2}P${wkdow[0]}${wkdow[1]}.ssc"
-    local site_u=$(echo $site | tr 'a-z' 'A-Z')
-    awk -v sit=${site_u} 'BEGIN{fg=0;x=0.0;y=0.0;z=0.0;sigx=0.0;sigy=0.0;sigz=0.0;snam=" "}\
-         {\
-           if($1=="+SOLUTION/ESTIMATE"){fg=1};if($1=="-SOLUTION/ESTIMATE"){fg=0};\
-           if(fg==1)\
-           {\
-             if($2=="STAX"){snam=$3;x=$9;sigx=$10};\
-             if($2=="STAY"){y=$9;sigy=$10};\
-             if($2=="STAZ"&&$3==sit)\
-             {\
-               z=$9;sigz=$10;printf(" %25.6f %25.6f %25.6f %25.6f %25.6f %25.6f\n",x,y,z,sigx,sigy,sigz);\
-               snam=" ";x=0.0;y=0.0;z=0.0;sigx=0.0;sigy=0.0;sigz=0.0;\
-             };\
-           }\
-         }' $igsssc
+    awk -v site=$(echo "$site" | tr 'a-z' 'A-Z') '{ 
+            if ($1 == "+SOLUTION/ESTIMATE") fg = 1
+            if ($1 == "-SOLUTION/ESTIMATE") fg = 0
+            if (fg == 1) {
+                if ($2 == "STAX") {
+                   x = $9; sigx = $10;
+                }
+                if ($2 == "STAY") {
+                   y = $9; sigy = $10;
+                }
+                if ($2 == "STAZ" && $3 == site) {
+                    z = $9; sigz = $10;
+                    printf(" %25.6f %25.6f %25.6f %25.6f %25.6f %25.6f\n", x, y, z, sigx, sigy, sigz)
+                }
+            } else {
+                x=0.0; y=0.0; z=0.0; sigx=0.0; sigy=0.0; sigz=0.0;
+            }
+        }' "snx_${ydoy[0]}${ydoy[1]}" 
 }
 
 ymd2mjd() {
@@ -2410,6 +3491,14 @@ mjd2ydoy() {
         doy=$(($mjd-$mjd0+1))
     done
     printf "%d %03d\n" $year $doy
+}
+
+wkdow2ydoy() {
+    local week=$((10#$1))
+    local dow=$2
+    local mjd0=44243
+    local mjd=$(($mjd0+1+$week*7+$dow))
+    mjd2ydoy $mjd
 }
 
 ymd2wkdow() {
@@ -2443,7 +3532,7 @@ ydoy2ymd() {
     local tmp2=$(($iyear%100))
     local tmp3=$(($iyear%400))
     if [ $tmp1 -eq 0 -a $tmp2 -ne 0 ] || [ $tmp3 -eq 0 ]; then
-       days_in_month[1]=29
+        days_in_month[1]=29
     fi
     local id=$idoy
     local imon=0
@@ -2461,16 +3550,17 @@ ydoy2ymd() {
     printf "%d %02d %02d\n" $iyear $imon $iday
 }
 
-xyz2blh(){
+xyz2blh() {
     local x=$1
     local y=$2
     local z=$3
-    echo "$x $y $z" | awk 'BEGIN{
+    echo "$x $y $z" | awk '
+        BEGIN {
             F = 298.257223563;
             A = 6378137.0;
             B = A - A/F;
             E = 1 - (B/A)^2;
-         }{
+        } {
             x=$1; y=$2; z=$3;
             d = sqrt(x^2+y^2);
             h0 = sqrt(d^2+z^2) - A;
@@ -2482,12 +3572,12 @@ xyz2blh(){
                 h0 = h;
                 b0 = b;
             }
-         }END{
+        } END {
             b = atan2(b, 1) * 180/atan2(0, -1);
             l = atan2(y, x) * 180/atan2(0, -1);
             if (l < 0) l += 360;
             printf("%15.7f%15.7f%15.4f\n", b, l, h)
-         }'
+        }'
 }
 
 ######################################################################
