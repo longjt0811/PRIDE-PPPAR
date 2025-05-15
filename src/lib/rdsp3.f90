@@ -1,7 +1,7 @@
 !
 !! rdsp3h.f90
 !!
-!!    Copyright (C) 2023 by Wuhan University
+!!    Copyright (C) 2022 by Wuhan University
 !!
 !!    This program belongs to PRIDE PPP-AR which is an open source software:
 !!    you can redistribute it and/or modify it under the terms of the GNU
@@ -9,14 +9,14 @@
 !!
 !!    This program is distributed in the hope that it will be useful,
 !!    but WITHOUT ANY WARRANTY; without even the implied warranty of
-!!    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+!!    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 !!    GNU General Public License (version 3) for more details.
 !!
 !!    You should have received a copy of the GNU General Public License
-!!    along with this program. If not, see <https://www.gnu.org/licenses/>.
+!!    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 !!
-!! Contributor: Maorong Ge, Jihang Lin, Yinda Deng
-!!
+!! Contributor: Maorong Ge, Jihang Lin
+!! 
 !!
 !!
 !! purpose   : read IGS sp3 orbit file
@@ -32,39 +32,37 @@ subroutine rdsp3h(fln, jd0, sod0, jd1, sod1, dintv, nprn, prn)
   implicit none
   include '../header/const.h'
 
-  integer*4, parameter :: MAXSAT_SP3 = 17 * 12
-
   integer*4 jd, jd1, nprn
   character*3 prn(1:*)
-  real*8 sod, sod1, dintv, xsp3(6, MAXSAT_SP3)
+  real*8 sod, sod1, dintv, xsp3(6, MAXSAT)
   character*(*) fln
 !
 !! local
-  logical*1 lopened
+  logical*1 lfirst
   integer*4 iy, im, id, ih, imin, nwk, mjd, i, jj, k, l, lfn, ierr, iflag
   character*3 j
   integer*4 nepo, jd0, nprn0, jdx
-  character*3 prn0(MAXSAT_SP3)
+  character*3 prn0(170)
   real*8 fmjd, sec, sod0, x, y, z, t, dt, sodx
   character*80 :: line = ''
-  character*1  :: cid = ''
+  character*1 :: sys(170), cid = ''
 !
 !! function called
   integer*4 modified_julday, pointer_string, get_valid_unit
   real*8 timdif
 
-  save nprn0, lfn
+  data lfirst/.true./
+  save lfirst, nprn0, lfn
 !
 !! first line with start time, # of epochs...
   lfn = 0
-  inquire (file=fln, opened=lopened)
-  if (.not. lopened) then
+  if (lfirst) then
     lfn = get_valid_unit(10)
     open (lfn, file=fln, status='old', iostat=ierr)
     if (ierr .ne. 0) then
       write (*, '(2a)') '***ERROR(rdsp3h): open file ', trim(fln)
       call exit(1)
-    end if
+    endif
     jd0 = 0
     sod0 = 0.d0
 !
@@ -76,26 +74,29 @@ subroutine rdsp3h(fln, jd0, sod0, jd1, sod1, dintv, nprn, prn)
       if (line(1:2) .eq. '#a') then
         write (*, '(2a)') '***ERROR(rdsp3h): unsupproted ephemeris version ('//line(1:2)//') ', trim(fln)
         call exit(1)
-      end if
+      endif
       if (line(1:2) .ne. '#c' .and. line(1:2) .ne. '#d') cycle
       read (lfn, '(3x,i4,17x,f14.8,1x,i5,1x,f15.13)') nwk, dintv, mjd, fmjd
 !
 !! third to 12th lines with satellite prns
-      read (lfn, '(2x,i4,3x,17(a3),9(/,9x,17(a3)))') nprn0, (prn0(i), i=1, MAXSAT_SP3)
-      if (nprn0 .gt. MAXSAT_SP3) then
+      read (lfn, '(2x,i4,3x,17(a3),9(/,9x,17(a3)))') nprn0, (prn0(i), i=1, 170)
+      do i=1,170
+        sys(i)=prn0(i)(1:1)
+      end do
+      if (nprn0 .gt. 170) then
         write (*, '(a,i3)') '***ERROR(rdsp3h): too many satellites in SP3 file ', nprn0
         call exit(1)
-      end if
+      endif
 !
 !! only GNSS satellites are allowed
       do i = 1, nprn0
-        if (index(GNSS_PRIO, prn0(i)(1:1)) .gt. 0 .and. &
-            pointer_string(nprn, prn, prn0(i)) .eq. 0) then
+        if((sys(i).eq.'G'.or.sys(i).eq.'R'.or.sys(i).eq.'E'.or.sys(i).eq.'C'.or.sys(i).eq.'J')&
+           .and.pointer_string(nprn,prn,prn0(i)).eq.0)then 
           nprn = nprn + 1
           prn(nprn) = prn0(i)
-        end if
-      end do
-    end do
+        endif
+      enddo
+    enddo
 !
 !! copy nprn to nprn0 for rdsp3i
 33  nprn0 = nprn
@@ -109,14 +110,15 @@ subroutine rdsp3h(fln, jd0, sod0, jd1, sod1, dintv, nprn, prn)
         if (jd0 .eq. 0) then
           jd0 = modified_julday(id, im, iy)
           sod0 = ih*3600.d0 + imin*60.d0 + sec
-        end if
-      end if
-    end do
+        endif
+      endif
+    enddo
 5   rewind lfn
     jd1 = modified_julday(id, im, iy)
     sod1 = ih*3600.d0 + imin*60.d0 + sec
+    lfirst = .false.
     return
-  end if
+  endif
 !
 !! read one record in SP3 file
 !
@@ -124,22 +126,22 @@ subroutine rdsp3h(fln, jd0, sod0, jd1, sod1, dintv, nprn, prn)
   if (lfn .eq. 0) then
     write (*, '(a)') '***ERROR(rdsp3i): sp3fil not open '
     call exit(1)
-  end if
+  endif
 !
 !! check if all requested satellites in sp3-file
   iflag = 1
   do jj = 1, nprn0
     do i = 1, 3
       xsp3(i, jj) = 1.d15
-    end do
-  end do
+    enddo
+  enddo
 !
 !! read the required record
   k = 0
   line = ' '
   do while (line(1:1) .ne. '*')
     read (lfn, '(a)', end=100) line
-  end do
+  enddo
 10 continue
   read (line(2:), *) iy, im, id, ih, imin, sec
   call yr2year(iy)
@@ -154,7 +156,7 @@ subroutine rdsp3h(fln, jd0, sod0, jd1, sod1, dintv, nprn, prn)
       if (line(1:1) .ne. 'P') cycle
       read (line(2:), '(a1)') cid
       read (line(2:), '(a3)') j
-      if (index(GNSS_PRIO, cid) .eq. 0) cycle
+      if(cid.ne.'G'.and.cid.ne.'R'.and.cid.ne.'E'.and.cid.ne.'C'.and.cid.ne.'J') cycle
       read (line(5:), '(3f14.6)') x, y, z
 !
 !! nprn <= 0, get all the satellite in the file, otherwise, get data of the requested satellites
@@ -163,22 +165,22 @@ subroutine rdsp3h(fln, jd0, sod0, jd1, sod1, dintv, nprn, prn)
       else
         k = k + 1
         prn(k) = j
-      end if
+      endif
 !
 !! k == 0, this satellite is not in the requested list
       if (k .ne. 0) then
         xsp3(1, k) = x
         xsp3(2, k) = y
         xsp3(3, k) = z
-      end if
-    end do
+      endif
+    enddo
   else if (dt .lt. -MAXWND) then
     line = ' '
     do while (line(1:1) .ne. '*')
       read (lfn, '(a)', end=100) line
-    end do
+    enddo
     goto 10
-  end if
+  endif
   backspace lfn
 
 100 continue
@@ -190,20 +192,13 @@ subroutine rdsp3h(fln, jd0, sod0, jd1, sod1, dintv, nprn, prn)
       xsp3(1, i) = 1.d15
       xsp3(2, i) = 1.d15
       xsp3(3, i) = 1.d15
-    end if
-  end do
+    endif
+  enddo
   return
-!/*=======================*/
-!
-!! rewind file
-  Entry rdsp3r()
-  rewind (lfn)
-  return
-!/*=======================*/
 !
 !! close file
   Entry rdsp3c()
   close (lfn)
   lfn = 0
   return
-end subroutine
+end

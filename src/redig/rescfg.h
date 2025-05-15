@@ -2,11 +2,11 @@
 !! resdig configure
 !
 type rescfg
-  character*20 obstyp, flnrhd
+  character*20 obstyp,flnrhd
 !
 !! start & stop time
   integer*4 jd0
-  real*8 sod0, dintv
+  real*8 sod0,dintv
 !
 !! number of satellite & PRNs
   integer*4 nprn
@@ -17,11 +17,7 @@ type rescfg
 !
 !! screening control
   integer*4 nsht
-  real*8 jump, pjump
-  logical*1 pcedit
-!
-!! keep continuous
-  character*15 amb_at_dbd
+  real*8 jump
 !
 !! common file
   integer*4 lfnres,lfnstt,lfnrhd

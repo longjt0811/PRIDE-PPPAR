@@ -1,7 +1,7 @@
 !
 !! pbopos.f90
 !!
-!!    Copyright (C) 2023 by Wuhan University
+!!    Copyright (C) 2022 by Wuhan University
 !!
 !!    This program belongs to PRIDE PPP-AR which is an open source software:
 !!    you can redistribute it and/or modify it under the terms of the GNU
@@ -9,34 +9,28 @@
 !!
 !!    This program is distributed in the hope that it will be useful,
 !!    but WITHOUT ANY WARRANTY; without even the implied warranty of
-!!    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+!!    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 !!    GNU General Public License (version 3) for more details.
 !!
 !!    You should have received a copy of the GNU General Public License
-!!    along with this program. If not, see <https://www.gnu.org/licenses/>.
+!!    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 !!
 !! Contributor: Jihang Lin, Yuanxin Pan
 !!
 !!
 program pbopos
-
   implicit none
-
 !
 !! variable list
-
   !! constant
   real*8, parameter :: RAD2DEG = 45.d0/atan(1.d0)
-
   !! global
   integer*4     narg, nfil, nrec
   integer*4     ierr
   integer*4     ityp
-
   !! file
   character*4   site, lsit, usit
   integer*4     lfntmp, lfnpos, lfnpbo
-
   !! record
   integer*4     mjd, year, doy, imon, iday, ih, im
   real*8        fjd, sod, sec
@@ -52,13 +46,11 @@ program pbopos
   character*15  current_epoch
   character*5   solution_type
   character*3   analcent_type
-
-  !! local
+  !! tmporary
   integer*4     i, j
   character*3   filtyp
   character*256 filnam
   character*512 line
-
 !
 !! function list
   integer*4 get_valid_unit
@@ -69,7 +61,7 @@ program pbopos
     write (*, '(a)') 'usage: pbopos site path [x_ref y_ref z_ref]'
     write (*, '(a)') ''
     write (*, '(a)') '  convert PRIDE-PPPAR pos files to PBO position series'
-    write (*, '(a)') '  created on Jan-11, 2022'
+    write (*, '(a)') '  created on JAN-11, 2022'
     write (*, '(a)') ''
     write (*, '(a)') 'example:'
     write (*, '(a)') '  1. pbopos alic pos_2020001_alic'
@@ -79,8 +71,8 @@ program pbopos
     write (*, '(a)') '    all position files with standard naming in directory will be recognized '
     write (*, '(a)') '  and found automatically, depends on which kind of path you input: '
     write (*, '(a)') ''
-    write (*, '(a)') '  1. ''./''             stop until no successive pos file exists'
-    write (*, '(a)') '  2. ''./yyyy/ddd/''    stop until no successive year folder exists'
+    write (*, '(a)') '  1. ''./''             stop untill no successive pos file exists'
+    write (*, '(a)') '  2. ''./yyyy/ddd/      stop untill no successive year folder exists'
     write (*, '(a)') ''
     write (*, '(a)') '    after that, all results will be output into one single PBO file.'
     write (*, '(a)') ''
@@ -93,7 +85,7 @@ program pbopos
     write (*, '(a)') '  aaa        3-character analysis center ID'
     write (*, '(a)') '  ttttt      5-character solution type ID'
     call exit(1)
-  end if
+  endif
   call getarg(1, site)
   call getarg(2, filnam)
 
@@ -106,11 +98,10 @@ program pbopos
       if (ierr .ne. 0) then
         write (*, '(a,i1,1x,a)') '***ERROR: read argument ', trim(line)
         call exit(1)
-      end if
-    end do
+      endif
+    enddo
     call xyzblh(refxyz, 1.d0, 0.d0, 0.d0, 0.d0, 0.d0, 0.d0, refblh)
-  end if
-
+  endif
 !
 !! case conversion
   do i = 1, len(site)
@@ -124,16 +115,15 @@ program pbopos
     else
        lsit(i:i) = char(j)
        usit(i:i) = char(j)
-    end if
-  end do
+    endif
+  enddo
 
   lfnpos = get_valid_unit(10)
   open(lfnpos, file=filnam, status='old', iostat=ierr)
-  if (ierr .ne. 0) goto 400
+  if (ierr .ne. 0) goto 100
 
   lfntmp = get_valid_unit(10)
   open(lfntmp, file='pbopos.tmp', form='unformatted')
-
 !
 !! read pos files
   nrec = 0
@@ -145,12 +135,12 @@ program pbopos
   do while (.true.)
     inquire(unit=lfnpos, name=filnam)
     do while (.true.)
-      read (lfnpos, '(a)', end=10, err=401) line
+      read (lfnpos, '(a)', end=10, err=200) line
       if (trim(line(61:)) .eq. 'STATION') then
         if (line(1:4) .eq. usit .or. line(1:4) .eq. lsit) cycle
         write (*, '(a,2(1x,a))') '###WARNING: conflicting site name:', line(1:4), filnam
         goto 10
-      end if
+      endif
       if (trim(line(61:)) .eq. 'SAT ORBIT') then
         do i = 1, 3
             j = ichar(line(i:i))
@@ -158,8 +148,8 @@ program pbopos
               analcent_type(i:i) = char(j+32)
             else
               analcent_type(i:i) = line(i:i)
-            end if
-        end do
+            endif
+        enddo
         select case (line(8:10))
           case ('FIN')
             solution_type = 'final'
@@ -169,53 +159,53 @@ program pbopos
             solution_type = 'suppl'
           case ('ULA')
             solution_type = 'suppf'
-        end select
+        endselect
         select case (line(5:7))
           case ('R03')
             solution_type = 'repro'
           case ('R3T')
             solution_type = 'repro'
-        end select
-      end if
+        endselect
+      endif
       if (trim(line(61:)) .eq. 'POS MODE/PRIORI (meter)') then
-        if (line(1:6) .eq. 'Static' .or. line(1:11) .eq. 'Quasi-fixed') filtyp = 'pos'
-      end if
+        if (line(1:6) .eq. 'Static')    filtyp = 'pos'
+      endif
       if (trim(line(61:)) .eq. 'END OF HEADER') then
         do while (.true.)
-          read (lfnpos, '(a)', end=10, err=401) line
+          read (lfnpos, '(a)', end=10, err=200) line
           if (line(1:1) .eq. '*') cycle
           if (filtyp .eq. 'pos') then
-            read (line, *, err=402) &
+            read (line, '(1x,a4,1x,f11.4,3f15.4,7e25.14)', err=250) &
               site, fjd, tmpxyz(1:3), stdxyz(1:3), covxyz(1:3), sigma0
             if (site .ne. usit .and. site .ne. lsit) cycle
             mjd = int(fjd)
             sod = (fjd - mjd) * 86400.d0
-          end if
+          endif
           write (lfntmp) mjd, sod, tmpxyz, stdxyz, covxyz, sigma0
           if (len_trim(first_epoch) .eq. 0) then
             call mjd2date(mjd, sod, year, imon, iday, ih, im, sec)
             write (first_epoch, '(i4,i0.2,i0.2,1x,i0.2,i0.2,i0.2)') &
               year, imon, iday, ih, im, nint(sec)
             if (all(refxyz .eq. 0.d0)) refxyz = tmpxyz
-          end if
+          endif
           avgxyz = avgxyz + tmpxyz - refxyz
           nrec = nrec + 1
-        end do
-      end if
-    end do
+        enddo
+      endif
+    enddo
 10 continue
     call next_posfil(lfnpos, j)
     close(lfnpos)
     if (j .eq. 0) exit
     lfnpos = j
-  end do
+  enddo
 
   avgxyz = avgxyz/nrec
   avgxyz = refxyz + avgxyz
   if (all(refblh .eq. 0.d0)) then
     refxyz = avgxyz
     call xyzblh(refxyz, 1.d0, 0.d0, 0.d0, 0.d0, 0.d0, 0.d0, refblh)
-  end if
+  endif
 
   call mjd2date(mjd, sod, year, imon, iday, ih, im, sec)
   write (last_epoch, '(i4,i0.2,i0.2,1x,i0.2,i0.2,i0.2)') &
@@ -223,13 +213,11 @@ program pbopos
 
   call date_and_time(current_epoch, line)
   current_epoch(10:15) = line(1:6)
-
 !
 !! write PBO file
   filnam = usit//'.'//analcent_type//'.'//solution_type//'_igs14.pos'
   lfnpbo = get_valid_unit(10)
-  open(lfnpbo, file=filnam, status='replace', err=400)
-
+  open(lfnpbo, file=filnam, status='replace', err=100)
   !! header
   write (lfnpbo, '(a)') 'PBO Station Position Time Series. Reference Frame : ITRF2014'
   write (lfnpbo, '(a)') 'Format Version: 1.1.0'
@@ -287,7 +275,7 @@ program pbopos
     call matmpy(rotmat, difxyz, tmpenu, 3,3,1)
     do i = 1, 3
       mqqxyz(i,i) = stdxyz(i)
-    end do
+    enddo
     mqqxyz(1,2) = covxyz(1)
     mqqxyz(1,3) = covxyz(2)
     mqqxyz(2,3) = covxyz(3)
@@ -303,7 +291,7 @@ program pbopos
     covxyz(3) = covxyz(3)/stdxyz(2)/stdxyz(3)
     do i = 1, 3
       stdenu(i) = sqrt(mqqenu(i,i)) * sigma0
-    end do
+    enddo
     covenu(1) = mqqenu(1,2)/stdenu(1)/stdenu(2)
     covenu(2) = mqqenu(1,3)/stdenu(1)/stdenu(3)
     covenu(3) = mqqenu(2,3)/stdenu(2)/stdenu(3)
@@ -313,7 +301,7 @@ program pbopos
       tmpblh(1:2)*RAD2DEG, tmpblh(3), tmpenu(2), tmpenu(1), tmpenu(3),        &
       stdenu(2), stdenu(1), stdenu(3), covenu(1), covenu(3), covenu(2),       &
       solution_type
-  end do
+  enddo
 
 20 continue
   close(lfntmp, status='delete')
@@ -321,14 +309,16 @@ program pbopos
 
   return
 
-400 continue
+100 continue
   write (*, '(2a)') '***ERROR: open file ', trim(filnam)
   call exit(1)
-401 continue
+
+200 continue
   write (*, '(2a)') '***ERROR: read file ', trim(filnam)
   write (*, '(a)') trim(line)
   call exit(1)
-402 continue
+
+250 continue
   write (*, '(a)') '***ERROR: read line '
   write (*, '(a)') trim(line)
   call exit(1)
@@ -348,19 +338,19 @@ contains
     integer*4 doy0, year0, mjd0
     integer*4 doy1, year1, mjd1
     integer*4 ierr
-    logical*1 is_alive
+    logical*4 is_alive
   !
   !! function used
     integer*4  get_valid_unit
     integer*4  modified_julday
   
     lfn_next = 0
-    inquire (unit=lfn_this, name=name_this, exist=is_alive)
+    inquire(unit=lfn_this, name=name_this, exist=is_alive)
 400 continue
     if (name_this .eq. '') then
       write (*, *) '###WARNING(next_posfil): open ', trim(name_this)
       return
-    end if
+    endif
   !
   !! split directory and base
     len0 = len_trim(name_this)
@@ -379,8 +369,8 @@ contains
           root_dir = trim(name_this(1:len3))
         else
           mid_dir = ''
-        end if
-      end if
+        endif
+      endif
       name_this = tmp_name
     elseif (len2 .ne. 0) then
       len1 = len2
@@ -396,25 +386,25 @@ contains
           root_dir = trim(name_this(1:len3+1))
         else
           mid_dir = ''
-        end if
-      end if
+        endif
+      endif
       name_this = tmp_name
     else
       root_dir = ''
-    end if
+    endif
   !
   !! try writing successor file name
     nlen = len_trim(name_this)
     if (nlen .ne. 11 .and. nlen .ne. 16) then
       write (*,*) '###WARNING(next_posfil): unrecognized naming convention of pos files: ', trim(name_this)
       return
-    end if
+    endif
 
     read (name_this(1:nlen), '(4x,i4,i3)', iostat=ierr) year0, doy0
     if (ierr .ne. 0) then
       write (*,*) '###WARNING(next_posfil): illegal naming of pos files: ', trim(name_this)
       return
-    end if
+    endif
 
     mjd0 = modified_julday(doy0, 0, year0)
     call mjd2doy(mjd0+1, year0, doy0)
@@ -433,7 +423,7 @@ contains
             mjd1 = modified_julday(doy1, 0, year1)
             call mjd2doy(mjd1+1, year1, doy1)
             write (mid_dir, '(i4,a1,i0.3,a1,i0.3,a1)') year0, '/',  doy0, '-', doy1, '/' 
-          end if
+          endif
         case (15)
           read (mid_dir(11:13), '(i3)', iostat=ierr) doy1
           if (ierr .eq. 0) then
@@ -442,9 +432,9 @@ contains
             mjd1 = modified_julday(doy1, 0, year1)
             call mjd2doy(mjd1+1, year1, doy1)
             write (mid_dir, '(i4,a2,i0.3,a1,i0.3,a2)') year0, '\\', doy0, '-', doy1, '\\' 
-          end if
-      end select
-    end if
+          endif
+      endselect
+    endif
 
     write (name_next, '(a4,i4,i0.3,a)') name_this(1:4), year0, doy0, name_this(12:nlen)
     name_next = trim(root_dir)//trim(mid_dir)//trim(name_next)
@@ -462,8 +452,8 @@ contains
       if (is_alive) then
         name_this = name_next
         goto 400
-      end if
-    end if
+      endif
+    endif
 
     return
   end subroutine

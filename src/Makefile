@@ -1,5 +1,12 @@
 
-SUBDIR = lib spp orbit tedit lsq redig arsig utils otl mhm
+SUBDIR = lib \
+	 orbit \
+	 lsq \
+	 arsig \
+	 tedit \
+	 redig \
+	 utils \
+	 spp
 
 all : $(SUBDIR)
 
@@ -8,12 +15,13 @@ $(SUBDIR) :
 
 install :
 	@mkdir -p ../bin/
-	mv arsig/arsig lsq/lsq tedit/tedit redig/redig orbit/sp3orb spp/spp otl/otl mhm/mhm \
-		$(patsubst %.f90,%,$(wildcard utils/*.f90)) ../bin/
+	mv arsig/arsig lsq/lsq tedit/tedit redig/redig orbit/sp3orb \
+		utils/xyz2enu utils/pbopos utils/get_ctrl spp/spp ../bin/
 
 .PHONY : all $(SUBDIR) install
+
 clean :
 	-rm -rf $(addsuffix /.obj, $(SUBDIR))
 	-rm -rf spp/*.o spp/*.mod
 	-rm -rf lib/libcom.a
-	-rm -rf mhm/*.o
+

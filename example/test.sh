@@ -2,17 +2,17 @@
 
 ###############################################################################
 ##                                                                           ##
-##  PURPOSE: Test PRIDE PPP-AR                                               ##
+##  PURPOSE: Test PRIDE PPP-AR 2                                             ##
 ##                                                                           ##
 ##  AUTHOR : the PRIDE Group pride@whu.edu.cn                                ##
 ##                                                                           ##
-##  VERSION: ver 3.0                                                         ##
+##  VERSION: ver 2.2                                                         ##
 ##                                                                           ##
-##  DATE   : Sept-13, 2023                                                   ##
+##  DATE   : Mar-23, 2022                                                    ##
 ##                                                                           ##
-##              @ GNSS RESEARCH CENTER, WUHAN UNIVERSITY, 2023               ##
+##              @ GNSS RESEARCH CENTER, WUHAN UNIVERSITY, 2022               ##
 ##                                                                           ##
-##    Copyright (C) 2023 by Wuhan University                                 ##
+##    Copyright (C) 2022 by Wuhan University                                 ##
 ##                                                                           ##
 ##    This program is free software: you can redistribute it and/or modify   ##
 ##    it under the terms of the GNU General Public License (version 3) as    ##
@@ -20,11 +20,11 @@
 ##                                                                           ##
 ##    This program is distributed in the hope that it will be useful,        ##
 ##    but WITHOUT ANY WARRANTY; without even the implied warranty of         ##
-##    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the           ##
+##    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          ##
 ##    GNU General Public License (version 3) for more details.               ##
 ##                                                                           ##
 ##    You should have received a copy of the GNU General Public License      ##
-##    along with this program. If not, see <https://www.gnu.org/licenses/>.  ##
+##    along with this program.  If not, see <https://www.gnu.org/licenses/>. ##
 ##                                                                           ##
 ###############################################################################
 
@@ -35,10 +35,11 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Check installation
+source ${HOME}/.bashrc
 lsq > /dev/null 2>&1
 if [ $? -eq 127 ]; then  # command not found
-    printf "${RED}error:${NC} PRIDE PPP-AR 3 lsq not found\n"
-    printf "${RED}error:${NC} PRIDE PPP-AR 3 testing failed\n"; exit
+    printf "${RED}error:${NC} PRIDE PPP-AR 2 lsq not found\n"
+    printf "${RED}error:${NC} PRIDE PPP-AR 2 testing failed\n"; exit
 fi
 
 MvDir() {
@@ -74,11 +75,7 @@ echo -e "\n${BLUE}(5) troposphere daily"
 pdp3 -m F ./data/2020/003/abpo0030.20o
 MvDir 2020/003 ./results/tropo-24h-fixed
 
-echo -e "\n${BLUE}(6} multipath daily"
-pdp3 -m K -sys g -mp ./data/2023/wuh20020.23o
-MvDir 2023/002 ./results/multipath-24h-fixed
-
-rm -rf 2020 2021 2023
+rm -rf 2020 2021
 
 # Output
 printf "${BLUE}::${NC} computation results are put in %s\n" ./results/

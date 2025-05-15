@@ -1,7 +1,7 @@
 !
 !! rdrnxoi2.f90
 !!
-!!    Copyright (C) 2023 by Wuhan University
+!!    Copyright (C) 2022 by Wuhan University
 !!
 !!    This program belongs to PRIDE PPP-AR which is an open source software:
 !!    you can redistribute it and/or modify it under the terms of the GNU
@@ -9,14 +9,14 @@
 !!
 !!    This program is distributed in the hope that it will be useful,
 !!    but WITHOUT ANY WARRANTY; without even the implied warranty of
-!!    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+!!    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 !!    GNU General Public License (version 3) for more details.
 !!
 !!    You should have received a copy of the GNU General Public License
-!!    along with this program. If not, see <https://www.gnu.org/licenses/>.
+!!    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 !!
-!! Contributor: Maorong Ge, Jianghui Geng, Jihang Lin, Jing Zeng
-!!
+!! Contributor: Maorong Ge, Jianghui Geng, Jihang Lin
+!! 
 !!
 !!
 !! purpose  : read one epoch data from a RINEX o-file
@@ -25,7 +25,7 @@
 !!            jd0, sod0 --- julian day and second of day of the requested epoch
 !!                          if they are zero, take the epoch the file pointer
 !!                          points at.
-!!            dwnd  --- window for time matching. If the obsersing time from the
+!!            wind  --- window for time matching. If the obsersing time from the
 !!                      rinex-file is close to the requested time within the
 !!                      window, we take the data. Be careful with this parameter
 !!                      when you are working sampling rate larger than 1Hz.
@@ -34,60 +34,55 @@
 !!                          epoch.
 !!            HD -- rinex header structure
 !!            OB -- observation structure
-!!            bias, nbias_used -- observable-specific biases and the number of 
-!!                                observations that are applied these biases
+!!            dcb -- P1C1 from CODE
+!!            bias -- biases for pppar
 !!            ierr -- error code, end of file or read fil error
 !!
 !
-subroutine rdrnxoi2(lfn, jd0, sod0, dwnd, nprn0, prn0, HD, OB, bias, nbias_used, ierr)
+subroutine rdrnxoi2(lfn, jd0, sod0, dwnd, nprn0, prn0, HD, OB, bias, ierr)
   implicit none
   include '../header/const.h'
-  include '../header/absbia.h'
   include '../header/rnxobs.h'
 
-! common
-  integer*4     idxfrq(MAXSYS, 2)
-  common        idxfrq
-! parameter
-  integer*4     lfn, jd0, nprn0, ierr
-  character*3   prn0(1:*)
-  real*8        sod0, dwnd
-  type(rnxhdr)  HD
-  type(rnxobr)  OB
-  type(absbia)  bias(MAXSAT, MAXTYP)
-  integer*4     nbias_used(MAXSAT)
-! local
-  integer*4     ioerr, iy, im, id, ih, imi, iepo, nprn
-  integer*4     iflag, i, j, k, i0, isys, nline
-  integer*4     ii, nobstype
-  integer*1     lli(MAXTYP), lli_thre
-  character*3   prn(MAXSAT)
-  real*8        sec, ds, dt, obs(MAXTYP), vobs,tmpobs
-  character*1   sysid(MAXSAT)
-  character*80  line, cline, msg, name
-  character*512 string
-!! RINEX-2 Signal Priority
-  logical*1     used_codeP(2)
-  integer*4     prio_index
-  integer*4     imes, ityp
-  integer*4     obs_prio_index(6)       !! RINEX-3 signal code of each measurement type
-  character*2   obs_styp_gnss(6)        !! measurement type (L/P) + frequency number(1-9)
-  character*2   ctyp
-  real*8        lambda(4)
-! function used
-  integer*4     modified_julday
-  integer*4     pointer_string
-
+  integer*4 ierr, lfn, jd0, nprn0
+  character*3 prn0(1:*)
+  real*8 sod0, dwnd
+  type(rnxhdr) HD
+  type(rnxobr) OB
 !
-!! initialize record
+!! local
+  logical*1 prior_gp1, prior_gp2, prior_rp1, prior_rp2
+  integer*4 ioerr, iy, im, id, ih, imi, nprn
+  character*3 prn(MAXSAT)
+  integer*4 iflag, i, j, i0, nline, ii, nobstype
+  real*8 sec, ds, dt, obs(MAXTYP), bias(MAXSAT, MAXTYP)
+  character*1 sysid(MAXSAT)
+  character*80 line, cline, msg, name
+  character*1024 string
+  ! R
+  integer*4 frequency_glo_nu,prn_int
+  real*8 :: FREQ1_R(-50:50),FREQ2_R(-50:50)
+  integer*4 biasW_index_G,biasC_index_G,biasL_index_G,&
+            biasC_index_R,biasP_index_R,&
+            biasX_index_E,biasI_index_C,biasL_index_J
+!
+!! function used
+  integer*4 modified_julday, pointer_string
+
+  call frequency_glonass(FREQ1_R,FREQ2_R)
   ierr = 0
   line = ' '
-  prn = ' '
-  nbias_used = -1
-  lli_thre = 3
-!
-!! read the next record
-10 continue
+  prn = ''
+  biasW_index_G = index(obs_prio_G, 'W')
+  biasC_index_G = index(obs_prio_G, 'C')
+  biasL_index_G = index(obs_prio_G, 'L')
+  biasC_index_R = index(obs_prio_R, 'C')
+  biasP_index_R = index(obs_prio_R, 'P')
+  biasX_index_E = index(obs_prio_E, 'X')
+  biasI_index_C = index(obs_prio_C, 'I')
+  biasL_index_J = index(obs_prio_J, 'L')
+
+10 continue  ! next record
   read (lfn, '(a)', end=200) line
   msg = ' '
 !
@@ -96,16 +91,13 @@ subroutine rdrnxoi2(lfn, jd0, sod0, dwnd, nprn0, prn0, HD, OB, bias, nbias_used,
     backspace lfn
     call rdrnxoh(lfn, HD, ioerr)
     goto 10
-  end if
-!
-!! for some special event
-  if (index(line, "COMMENT") .ne. 0) goto 10
+  endif
 !
 !! number of satellite
   read (line(30:32), '(i3)', iostat=ioerr) nprn
   if (ioerr .ne. 0) then
     msg = 'read satellite number error.'
-  end if
+  endif
 !
 !! check the RINEX 2 event flag
   read (line(27:29), '(i3)', iostat=ioerr) iflag
@@ -118,18 +110,21 @@ subroutine rdrnxoi2(lfn, jd0, sod0, dwnd, nprn0, prn0, HD, OB, bias, nbias_used,
       if (line(61:80) .eq. 'ANTENNA: DELTA H/E/N') then
         msg = 'read internal antenna information error'
         read (line, '(3f14.4)', err=100) HD%h, HD%e, HD%n
-      end if
-    end do
+      endif
+    enddo
     goto 10
-  end if
+  endif
   if (nprn .gt. MAXSAT) then
     msg = 'satellite number > maxsat'
-  end if
+  endif
   if (len_trim(msg) .ne. 0) goto 100
 !
 !! initialization
-  OB%obs = 0.d0
-  OB%lli = 0
+  do i = 1, MAXSAT
+    do j = 1, 6
+      OB%obs(i, j) = 0.d0
+    enddo
+  enddo
 !
 !! format of the time tag line
   msg = 'read time & svn error'
@@ -137,14 +132,14 @@ subroutine rdrnxoi2(lfn, jd0, sod0, dwnd, nprn0, prn0, HD, OB, bias, nbias_used,
   if (nprn .gt. MAXSAT) then
     write (*, '(a,i3)') '***ERROR(rdrnxoi2): nprn > maxsat ', nprn
     call exit(1)
-  end if
+  endif
   read (line(68:80), '(f13.9)', iostat=ioerr) dt
   if (ioerr .ne. 0) dt = 0.d0
   read (line, '(32x,12(a3))', err=100) (prn(i), i=1, min(nprn, 12))
-  do i = 1, min(nprn, 12)
-    if (prn(i)(1:1) .eq. ' ' .and. prn(i)(3:3) .ne. ' ') prn(i)(1:1) = 'G'
-    if (prn(i)(2:2) .eq. ' ' .and. prn(i)(3:3) .ne. ' ') prn(i)(2:2) = '0'
-    sysid(i) = prn(i)(1:1)
+  do i=1,min(nprn,12)
+    if(prn(i)(1:1) .eq. ' ' .and. prn(i)(3:3) .ne. ' ')prn(i)(1:1)='G'
+    if(prn(i)(2:2) .eq. ' ' .and. prn(i)(3:3) .ne. ' ')prn(i)(2:2)='0'
+    sysid(i)=prn(i)(1:1)
   end do
 !
 !! check time
@@ -152,7 +147,7 @@ subroutine rdrnxoi2(lfn, jd0, sod0, dwnd, nprn0, prn0, HD, OB, bias, nbias_used,
       .or. imi .lt. 0 .or. imi .gt. 60 .or. sec .lt. 0.d0 .or. sec .gt. 60.d0) then
     msg = 'epoch time incorrect'
     goto 100
-  end if
+  endif
   call yr2year(iy)
 !
 !! check on time tags. do not change the requested time if there is no data
@@ -175,26 +170,25 @@ subroutine rdrnxoi2(lfn, jd0, sod0, dwnd, nprn0, prn0, HD, OB, bias, nbias_used,
       i = i + ((HD%nobstyp - 1)/5 + 1)*nprn
       do j = 1, i
         read (lfn, '(a)') line
-      end do
+      enddo
       line = ' '
       goto 10
-    end if
-  end if
+    endif
+  endif
 !
 !! in case of mult lines for PRN number, continous lines must be read here.
   ii = 1
   do while (nprn .gt. 12*ii)
     read (lfn, '(32x,12(a3))', err=100) (prn(i), i=12*ii + 1, min(12*ii + 12, nprn))
-    do i = 12*ii + 1, min(12*ii + 12, nprn)
-      if ((prn(i)(1:1) .eq. ' ') .and. (prn(i)(3:3) .ne. ' ')) prn(i)(1:1) = 'G'
-      if ((prn(i)(2:2) .eq. ' ') .and. (prn(i)(3:3) .ne. ' ')) prn(i)(2:2) = '0'
-      sysid(i) = prn(i)(1:1)
+    do i=12*ii+1,min(12*ii+12,nprn)
+      if(prn(i)(1:1) .eq. ' ' .and. prn(i)(3:3) .ne. ' ')prn(i)(1:1)='G'
+      if(prn(i)(2:2) .eq. ' ' .and. prn(i)(3:3) .ne. ' ')prn(i)(2:2)='0'
+      sysid(i)=prn(i)(1:1)
     end do
     ii = ii + 1
   end do
 !
-!! read data
-!! if more than 10 type 3 line should be merged to one
+!! read data. if more than 10 type 3 line should be merged to one
   do i = 1, nprn
     read (lfn, '(a80)', err=100, end=200) string
     cline = ' '
@@ -205,176 +199,151 @@ subroutine rdrnxoi2(lfn, jd0, sod0, dwnd, nprn0, prn0, HD, OB, bias, nbias_used,
       cline = ' '
       ii = ii + 1
     end do
-    isys = index(GNSS_PRIO, sysid(i))
-    if (isys .eq. 0) cycle
-!
-!! get the index and the priority of each GNSS and signal type
-    lambda = 1.d0
-    if (index('GR', sysid(i)) .ne. 0) then
-      if ('G' .eq. sysid(i)) then
-        obs_prio_index(:) = index(obs_prio_G, 'W')
-        obs_prio_index(5) = index(obs_prio_G, 'C')
-        obs_prio_index(6) = index(obs_prio_G, 'L')
-      else
-        obs_prio_index(:) = index(obs_prio_G, 'W')
-        obs_prio_index(5) = index(obs_prio_G, 'C')
-        obs_prio_index(6) = index(obs_prio_G, 'L')
-      end if
-      do j = 1, 2
-        k = idxfrq(isys, j)
-        write (obs_styp_gnss(j + 0), '(a1,i1)') 'L', k
-        write (obs_styp_gnss(j + 2), '(a1,i1)') 'P', k
-        write (obs_styp_gnss(j + 4), '(a1,i1)') 'C', k
-        lambda(j) = VLIGHT/FREQ_SYS(k, isys)
-      end do
-    elseif (index('ECJ', sysid(i)) .ne. 0) then
-      if ('E' .eq. sysid(i)) then
-        obs_prio_index(:) = index(obs_prio_E, 'X')
-        obs_prio_index(5) = 0
-        obs_prio_index(6) = 0
-      elseif ('C' .eq. sysid(i)) then
-        obs_prio_index(:) = index(obs_prio_C, 'I')
-        obs_prio_index(5) = 0
-        obs_prio_index(6) = 0
-      elseif ('J' .eq. sysid(i)) then
-        obs_prio_index(:) = index(obs_prio_J, 'L')
-        obs_prio_index(5) = 0
-        obs_prio_index(6) = 0
-      end if
-      do j = 1, 2
-        k = idxfrq(isys, j)
-        write (obs_styp_gnss(j + 0), '(a1,i1)') 'L', k
-        write (obs_styp_gnss(j + 2), '(a1,i1)') 'C', k
-        write (obs_styp_gnss(j + 4), '(a2)') 'XX'
-        lambda(j) = VLIGHT/FREQ_SYS(k, isys)
-      end do
-    end if
 !
 !! check if the sallite is requested
+    if(sysid(i).ne.'G' .and. sysid(i).ne.'R' .and. sysid(i).ne.'E' .and. sysid(i).ne.'C' .and. sysid(i).ne.'J') cycle
+    read(prn(i),'(1x,i2)') prn_int
     nobstype = min(HD%nobstyp, MAXTYP)
-    read (string, '(30(f14.3,i1,1x))', err=100) (obs(j), lli(j), j=1, nobstype)
+    read (string, '(30(f14.3,2x))', err=100) (obs(j), j=1, nobstype)
     i0 = 0
     if (nprn0 .gt. 0) then
       do j = 1, nprn0
         if (prn0(j) .eq. prn(i)) i0 = j
-      end do
+      enddo
     else
       i0 = i
-    end if
+    endif
 !
 !! fill in the obs. structure
     if (i0 .ne. 0) then
-      nbias_used(i0) = 0
-      used_codeP = .false.
-      ! write(*, '(A)') "asda"
+      prior_gp1 = .false.
+      prior_gp2 = .false.
+      prior_rp1 = .false.
+      prior_rp2 = .false.
       do j = 1, HD%nobstyp
-        !
-        ctyp = HD%obstyp(j)(1:2)
-        
-        if (dabs(obs(j)) .lt. MAXWND .or. dabs(obs(j)) .gt. 1.d12) cycle
-        !! check the index of prior signal & measurement type (L/C)
-     
-        do imes = 1, 6
-         
-           if ((index(HD%obstyp(j), obs_styp_gnss(imes)) .ne. 0) .or. &
-              (ctyp(1:2) .eq. 'LA' .and. imes == 1 ) .or. &
-              (ctyp(1:2) .eq. 'LB' .and. imes == 1 ) .or. &
-              (ctyp(1:2) .eq. 'LC' .and. imes == 2 ) .or. &
-              (ctyp(1:2) .eq. 'CA' .and. imes == 5 ) .or. &
-              (ctyp(1:2) .eq. 'CB' .and. imes == 5 ) .or. &
-              (ctyp(1:2) .eq. 'CC' .and. imes == 6 )) then
-            ! write(*, '(A, I5)') ctyp, isys
-            if (ctyp(2:2) == 'A') then
-                obs_prio_index(imes) = index(obs_prio_G, 'C') 
-            elseif (ctyp(2:2) == 'B' .or. ctyp(2:2) == 'C') then
-                obs_prio_index(imes) = index(obs_prio_G, 'L')  
-            end if
-            prio_index = obs_prio_index(imes)
-            if (imes .le. 2) exit
-            tmpobs=dabs(obs(j))
-            if (dabs(obs(j)) .gt.1.d-3) then
-              if (imes .le. 4) then
-                used_codeP(imes - 2) = .true.
-              else
-                if (used_codeP(imes - 4)) goto 50
-              end if
-              exit
-            end if
-          end if
-          if (imes .eq. 6) goto 50
-        end do
-        if (imes .gt. 4) imes = imes - 2
-        !
-        !! GLONASS
-        if (sysid(i) .eq. 'R') then
-          if (HD%obstyp(j)(1:1) .ne. 'L') goto 20
-          !
-          !! no absolute bias for GLONASS phase observation
-          OB%obs(i0, imes) = obs(j)
-          if (imes .le. 2) OB%lli(i0, imes) = iand(lli(j), lli_thre)
-          OB%typuse(i0, imes) = HD%obstyp(j)
-          cycle
-        end if
-20      continue
-        !
-        !! calculate epoch index
-        ityp = prio_index + (imes - 1) * 9
-        if (bias(i0, ityp)%length .gt. 0) then
-          iepo = int(OB%tsec/bias(i0, ityp)%period) + 1
-          if (iepo .lt. 1) iepo = 1
-          if (iepo .gt. bias(i0, ityp)%length) iepo = bias(i0, ityp)%length
-          ds = 0.d0
-          if (bias(i0, ityp)%length .gt. 1) then
-            ds = OB%tsec - (iepo-0.5)*bias(i0, ityp)%period
-          end if
-          if (abs(bias(i0, ityp)%val(iepo) - 1.d9) .gt. 1.d-3) then
-            vobs = bias(i0, ityp)%val(iepo)/lambda(imes)
-            if (bias(i0, ityp)%length .gt. 1) then
-              if (abs(bias(i0, ityp)%grd(iepo) - 1.d9) .gt. 1.d-3) then
-                vobs = vobs + bias(i0, ityp)%grd(iepo)/lambda(imes) * ds
-              end if
-            end if
-            OB%obs(i0, imes) = obs(j) - vobs
-            if (imes .le. 2) OB%lli(i0, imes) = iand(lli(j), lli_thre)
-            nbias_used(i0) = nbias_used(i0) + 1
-            OB%typuse(i0, imes) = HD%obstyp(j)
-            goto 50
-          end if
-        end if
-        OB%obs(i0, imes) = obs(j)
-        OB%typuse(i0, imes) = HD%obstyp(j)
-        if (imes .le. 2) OB%lli(i0, imes) = iand(lli(j), lli_thre)
-50      continue
-        OB%itypuse(i0, imes) = -1
-        if (abs(OB%tsec) .le. MAXWND .or. abs(OB%tsec - 864.d2) .le. MAXWND) then
-          if (prio_index .gt. 0) OB%itypuse(i0, imes) = prio_index + (imes - 1) * 9
-        end if
+        if (sysid(i).eq.'G') then
+          if (HD%obstyp(j) .eq. 'L1') then
+            OB%obs(i0, 1) = obs(j) - bias(i0, biasW_index_G)*FREQ1_G/VLIGHT
+            OB%typuse(i0, 1) = HD%obstyp(j)
+          else if (HD%obstyp(j) .eq. 'L2') then
+            OB%obs(i0, 2) = obs(j) - bias(i0, biasW_index_G+9)*FREQ2_G/VLIGHT
+            OB%typuse(i0, 2) = HD%obstyp(j)
+          else if (HD%obstyp(j) .eq. 'P1' .and. dabs(obs(j)) .gt. 1.d7) then
+            OB%obs(i0, 3) = obs(j) - bias(i0, biasW_index_G+9*2)
+            prior_gp1 = .true.
+            OB%typuse(i0, 3) = HD%obstyp(j)
+          else if (HD%obstyp(j) .eq. 'C1' .and. dabs(obs(j)) .gt. 1.d7) then
+            if (.not. prior_gp1) then
+              OB%obs(i0, 3) = obs(j) - bias(i0, biasC_index_G+9*2)
+              OB%typuse(i0, 3) = HD%obstyp(j)
+            endif
+          else if (HD%obstyp(j) .eq. 'P2' .and. dabs(obs(j)) .gt. 1.d7) then
+            OB%obs(i0, 4) = obs(j) - bias(i0, biasW_index_G+9*3)
+            prior_gp2 = .true.
+            OB%typuse(i0, 4) = HD%obstyp(j)
+          else if (HD%obstyp(j) .eq. 'C2' .and. dabs(obs(j)) .gt. 1.d7) then
+            if (.not. prior_gp2) then
+              OB%obs(i0, 4) = obs(j) - bias(i0, biasL_index_G+9*3)
+              OB%typuse(i0, 4) = HD%obstyp(j)
+            endif
+          endif
+        elseif (sysid(i).eq.'R') then
+          frequency_glo_nu=OB%glschn(prn_int)
+          if (HD%obstyp(j) .eq. 'L1') then
+            OB%obs(i0, 1) = obs(j)
+            OB%typuse(i0, 1) = HD%obstyp(j)
+          else if (HD%obstyp(j) .eq. 'L2') then
+            OB%obs(i0, 2) = obs(j)
+            OB%typuse(i0, 2) = HD%obstyp(j)
+          else if (HD%obstyp(j) .eq. 'P1' .and. dabs(obs(j)) .gt. 1.d7) then
+            OB%obs(i0, 3) = obs(j) - bias(i0, biasP_index_R+9*2)
+            prior_rp1 = .true.
+            OB%typuse(i0, 3) = HD%obstyp(j)
+          else if (HD%obstyp(j) .eq. 'C1' .and. dabs(obs(j)) .gt. 1.d7) then
+            if (.not. prior_rp1) then
+              OB%obs(i0, 3) = obs(j) - bias(i0, biasC_index_R+9*2)
+              OB%typuse(i0, 3) = HD%obstyp(j)
+            endif
+          else if (HD%obstyp(j) .eq. 'P2' .and. dabs(obs(j)) .gt. 1.d7) then
+            OB%obs(i0, 4) = obs(j) - bias(i0, biasP_index_R+9*3)
+            prior_rp2 = .true.
+            OB%typuse(i0, 4) = HD%obstyp(j)
+          else if (HD%obstyp(j) .eq. 'C2' .and. dabs(obs(j)) .gt. 1.d7) then
+            if (.not. prior_rp2) then
+              OB%obs(i0, 4) = obs(j) - bias(i0, biasC_index_R+9*3)
+              OB%typuse(i0, 4) = HD%obstyp(j)
+            endif
+          endif
+        elseif (sysid(i).eq.'E') then
+          if (HD%obstyp(j) .eq. 'L1') then
+            OB%obs(i0, 1) = obs(j) - bias(i0, biasX_index_E)*FREQ1_E/VLIGHT
+            OB%typuse(i0, 1) = HD%obstyp(j)
+          else if (HD%obstyp(j).eq.'L5') then
+            OB%obs(i0, 2) = obs(j) - bias(i0, biasX_index_E+9)*FREQ2_E/VLIGHT
+            OB%typuse(i0, 2) = HD%obstyp(j)
+          else if (HD%obstyp(j) .eq. 'C1' .and. dabs(obs(j)) .gt. 1.d7) then
+            OB%obs(i0, 3) = obs(j) - bias(i0, biasX_index_E+9*2)
+            OB%typuse(i0, 3) = HD%obstyp(j)
+          else if (HD%obstyp(j) .eq. 'C5' .and. dabs(obs(j)) .gt. 1.d7) then
+            OB%obs(i0, 4) = obs(j) - bias(i0, biasX_index_E+9*3)
+            OB%typuse(i0, 4) = HD%obstyp(j)
+          endif
+        elseif (sysid(i).eq.'C') then
+          if (HD%obstyp(j) .eq. 'L2') then
+            OB%obs(i0, 1) = obs(j) - bias(i0, biasI_index_C)*FREQ1_C/VLIGHT
+            OB%typuse(i0, 1) = HD%obstyp(j)
+          else if (HD%obstyp(j).eq.'L6') then ! BDS-2 B1I&B3I
+          !else if (HD%obstyp(j).eq.'L7') then ! BDS-2 B1I&B2I
+            OB%obs(i0, 2) = obs(j) - bias(i0, biasI_index_C+9)*FREQ2_C/VLIGHT
+            OB%typuse(i0, 2) = HD%obstyp(j)
+          else if (HD%obstyp(j) .eq. 'C2' .and. dabs(obs(j)) .gt. 1.d7) then
+            OB%obs(i0, 3) = obs(j) - bias(i0, biasI_index_C+9*2)
+            OB%typuse(i0, 3) = HD%obstyp(j)
+          else if (HD%obstyp(j) .eq. 'C6' .and. dabs(obs(j)) .gt. 1.d7) then ! BDS-2 B1I&B3I
+          !else if (HD%obstyp(j) .eq. 'C7' .and. dabs(obs(j)) .gt. 1.d7) then ! BDS-2 B1I&B2I
+            OB%obs(i0, 4) = obs(j) - bias(i0, biasI_index_C+9*3)
+            OB%typuse(i0, 4) = HD%obstyp(j)
+          endif
+        elseif (sysid(i).eq.'J') then
+          if (HD%obstyp(j) .eq. 'L1') then
+            OB%obs(i0, 1) = obs(j) - bias(i0, biasL_index_J)*FREQ1_J/VLIGHT
+            OB%typuse(i0, 1) = HD%obstyp(j)
+          else if (HD%obstyp(j).eq.'L2') then
+            OB%obs(i0, 2) = obs(j) - bias(i0, biasL_index_J+9)*FREQ2_J/VLIGHT
+            OB%typuse(i0, 2) = HD%obstyp(j)
+          else if (HD%obstyp(j) .eq. 'C1' .and. dabs(obs(j)) .gt. 1.d7) then
+            OB%obs(i0, 3) = obs(j) - bias(i0, biasL_index_J+9*2)
+            OB%typuse(i0, 3) = HD%obstyp(j)
+          else if (HD%obstyp(j) .eq. 'C2' .and. dabs(obs(j)) .gt. 1.d7) then
+            OB%obs(i0, 4) = obs(j) - bias(i0, biasL_index_J+9*3)
+            OB%typuse(i0, 4) = HD%obstyp(j)
+          endif
+        endif
       enddo
-!
 !! if one of the phases is zero, or the data is removed before
       if (any(OB%obs(i0, 1:4) .eq. 0.d0)) then
         OB%obs(i0, 1:4) = 0.d0
-        OB%lli(i0, 1:2) = 0
-        nbias_used(i0) = -1
-      end if
-    end if
-  end do
-!
-!! check PRN
+      endif
+    endif
+  enddo
+
   if (nprn0 .eq. 0) then
     OB%nprn = nprn
     do i = 1, nprn
-      if (index(GNSS_PRIO, sysid(i)) .ne. 0) then
+      if(sysid(i).eq.'G' .or. sysid(i).eq.'R' .or. sysid(i).eq.'E' .or. sysid(i).eq.'C' .or. sysid(i).eq.'J') then
         OB%prn(i) = prn(i)
       else
         OB%prn(i) = ''
-      end if
-    end do
+      endif
+    enddo
   else
     OB%nprn = nprn0
-    OB%prn(1:nprn0) = prn0(1:nprn0)
-  end if
+    do i = 1, nprn0
+      OB%prn(i) = prn0(i)
+    enddo
+  endif
   OB%dtrcv = dt
+
 !
 !! normal ending
   return
@@ -383,8 +352,8 @@ subroutine rdrnxoi2(lfn, jd0, sod0, dwnd, nprn0, prn0, HD, OB, bias, nbias_used,
 100 continue
   ierr = 1
   inquire (unit=lfn, name=name)
-  write (*, '(a/a/a)') '***ERROR(rdrnxoi2): read file, '//trim(name), &
-                       '   line :'//line(:), '   msg  :'//trim(msg)
+  write (*, '(a/a/a)') '***ERROR(rdrnxoi2): read file, '//trim(name), '   line :'//line(1:80), ' &
+    msg  :'//trim(msg)
   call exit(1)
 !
 !! come here on end of file
@@ -393,8 +362,7 @@ subroutine rdrnxoi2(lfn, jd0, sod0, dwnd, nprn0, prn0, HD, OB, bias, nbias_used,
   inquire (unit=lfn, name=name)
   do i = 1, MAXSAT
     OB%obs(i, 1:4) = 0.d0
-    OB%lli(i, 1:2) = 0
-  end do
+  enddo
   write (*, '(a/a)') '###WARNING(rdrnxoi2): end of file, ', trim(name)
   return
-end subroutine
+end
